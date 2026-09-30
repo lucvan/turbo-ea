@@ -24,6 +24,20 @@ _DOCKERFILE = _ROOT / "Dockerfile"
 _FRONTEND_NGINX = _ROOT / "frontend" / "nginx.conf"
 _ENTRYPOINT_OPEN = "RUN cat <<'EOF' > /usr/local/bin/turboea-nginx-entrypoint"
 _CSP_RE = re.compile(r'add_header Content-Security-Policy \\"([^"]*)\\" always;')
+# The SPA and the embed page are the two policies that load the Google Fonts
+# stylesheets; this exact source list is what identifies them.
+_SPA_STYLE_SRC = ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"]
+_SCHEME_ONLY = {"https:", "http:", "data:", "blob:"}
+
+
+def _directives(policy: str) -> dict[str, list[str]]:
+    """Parse a CSP header value into {directive: [source tokens]}."""
+    out: dict[str, list[str]] = {}
+    for directive in policy.split(";"):
+        name, _, sources = directive.strip().partition(" ")
+        if name:
+            out[name] = sources.split()
+    return out
 
 
 def _entrypoint() -> str:
@@ -62,6 +76,38 @@ class TestContentSecurityPolicy:
         app = [p for p in policies if "form-action 'self'" in p and "EMBED" not in p]
         assert app, "no app/api CSP found"
         assert all("frame-ancestors 'self'" in p for p in app), app
+
+    # ZAP's CSP rule (10055) is IGNOREd in .github/zap-rules.tsv because two of
+    # its findings are deliberate — `img-src https:` and Emotion's
+    # `style-src 'unsafe-inline'` — and the rules file cannot accept a
+    # sub-alert without accepting the plugin. These two tests are what keep
+    # that IGNORE from hiding a real regression: the SPA and the embed page
+    # run the app bundle alone, and no policy may open a scriptable directive
+    # to the world. Policies are compared as parsed directives, never as
+    # substrings of the header string.
+    def test_spa_and_embed_policies_run_only_the_bundle(self):
+        spa = [
+            d
+            for d in map(_directives, _CSP_RE.findall(_entrypoint()))
+            if d.get("style-src") == _SPA_STYLE_SRC
+        ]
+        assert len(spa) >= 4, f"expected the SPA and embed policies of both server blocks: {spa}"
+        loose = [d for d in spa if d.get("script-src") != ["'self'"]]
+        assert not loose, (
+            "the SPA / embed CSP must keep `script-src 'self'` exact — no inline, no eval, "
+            f"no CDN: {loose}"
+        )
+
+    def test_no_scriptable_directive_is_open_to_the_world(self):
+        offenders = []
+        for directives in map(_directives, _CSP_RE.findall(_entrypoint())):
+            for name in ("script-src", "connect-src", "frame-src", "object-src", "base-uri"):
+                tokens = directives.get(name, [])
+                if "*" in tokens or any(t in _SCHEME_ONLY for t in tokens):
+                    offenders.append((name, tokens))
+        assert not offenders, (
+            f"wildcard or scheme-only source on a scriptable directive: {offenders}"
+        )
 
 
 class TestGeneratedConfigHasNoBackticks:
