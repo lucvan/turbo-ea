@@ -90,3 +90,99 @@ describe("HistoryTab — approval status changes", () => {
     expect(await screen.findByText("SUPERSEDED")).toBeInTheDocument();
   });
 });
+
+describe("HistoryTab — document link edits (#1166)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /* `url` and `type` are the link's own fields. Without the override the row
+   * would show the raw key, or borrow the label of a card attribute that
+   * happens to be keyed `type`. */
+  it("labels a link's url and type rows as the link dialog does", async () => {
+    vi.mocked(api.get).mockResolvedValue([
+      {
+        id: "evt-3",
+        event_type: "document.updated",
+        created_at: "2026-09-30T10:00:00Z",
+        user_id: "u1",
+        user_display_name: "Vincent",
+        data: {
+          document_id: "doc-1",
+          name: "Runbook",
+          url: "https://wiki.example.com/ops",
+          type: "operations",
+          summary: "Runbook",
+          changes: {
+            url: { old: "https://wiki.example.com/runbook", new: "https://wiki.example.com/ops" },
+            type: { old: "documentation", new: "operations" },
+          },
+        },
+      },
+    ]);
+
+    renderTab();
+
+    expect(await screen.findByText("Document link updated")).toBeInTheDocument();
+    expect(screen.getByText("URL")).toBeInTheDocument();
+    expect(screen.getByText("Link Type")).toBeInTheDocument();
+    expect(screen.getByText("https://wiki.example.com/ops")).toBeInTheDocument();
+    expect(screen.getByText("operations")).toBeInTheDocument();
+  });
+});
+
+describe("HistoryTab — file attachment replace and edit (#1166)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("renders a replace as old version → new version", async () => {
+    vi.mocked(api.get).mockResolvedValue([
+      {
+        id: "evt-4",
+        event_type: "file.replaced",
+        created_at: "2026-10-01T10:00:00Z",
+        user_id: "u1",
+        user_display_name: "Vincent",
+        data: {
+          attachment_id: "file-1",
+          name: "new.pdf",
+          size: 300,
+          mime_type: "application/pdf",
+          summary: "new.pdf",
+          previous: { name: "old.pdf", size: 204800, mime_type: "application/pdf" },
+        },
+      },
+    ]);
+
+    renderTab();
+
+    expect(await screen.findByText("File replaced")).toBeInTheDocument();
+    expect(screen.getByText("old.pdf · 200.0 KB → new.pdf · 0.3 KB")).toBeInTheDocument();
+  });
+
+  it("labels a file's category row as the upload dialog does", async () => {
+    vi.mocked(api.get).mockResolvedValue([
+      {
+        id: "evt-5",
+        event_type: "file.updated",
+        created_at: "2026-10-01T10:00:00Z",
+        user_id: "u1",
+        user_display_name: "Vincent",
+        data: {
+          attachment_id: "file-1",
+          name: "spec.pdf",
+          size: 2048,
+          summary: "spec.pdf",
+          changes: { category: { old: null, new: "security" } },
+        },
+      },
+    ]);
+
+    renderTab();
+
+    expect(await screen.findByText("File updated")).toBeInTheDocument();
+    expect(screen.getByText("Category")).toBeInTheDocument();
+    expect(screen.getByText("security")).toBeInTheDocument();
+  });
+});

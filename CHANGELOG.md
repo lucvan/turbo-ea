@@ -5,6 +5,19 @@ All notable changes to Turbo EA are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.156.0] - 2026-10-01
+
+### Added
+
+- **Document links on a card's Resources tab can be edited.** A pencil icon next to each link opens the same dialog used to add one, with the name, URL and link type pre-filled; the change is recorded in the card's History tab and the dashboard activity feed, and a save that changes nothing records nothing ([#1166](https://github.com/vincentmakes/turbo-ea/issues/1166)).
+- **A file attachment can be replaced in place, renamed and re-categorised.** The replace icon next to a file uploads a new version into the same entry under the same checks as an upload (and is unavailable while uploads are switched off); the entry is then dated and attributed to the person who replaced it, and the version it superseded survives only in the card's History. The pencil icon changes the file's name — the extension must stay the same — or its category. Both are recorded in History and the dashboard activity feed ([#1166](https://github.com/vincentmakes/turbo-ea/issues/1166)).
+
+### Fixed
+
+- **Adding a document link no longer fails with a bare "Failed to link".** A URL without `http://`, `https://` or `mailto:` is flagged under the field as you type, with Add disabled until it is fixed, and a rejection the server does return is shown inside the dialog with its reason rather than behind it ([#1166](https://github.com/vincentmakes/turbo-ea/issues/1166)). The report blamed a preceding delete; the delete was innocent.
+- **An empty or whitespace-only URL on a document link is stored as no URL** instead of being refused.
+- **Unlinking a diagram from a card's Resources tab no longer opens that diagram**, including when the confirmation is cancelled ([#1166](https://github.com/vincentmakes/turbo-ea/issues/1166)).
+
 ## [2.155.1] - 2026-09-30
 
 ### Added

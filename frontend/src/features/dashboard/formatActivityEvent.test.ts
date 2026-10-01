@@ -136,7 +136,16 @@ describe("formatActivityEvent", () => {
       formatActivityEvent({ ...baseEvent, event_type: "document.added" }, t).category,
     ).toBe("document");
     expect(
+      formatActivityEvent({ ...baseEvent, event_type: "document.updated" }, t).category,
+    ).toBe("document");
+    expect(
       formatActivityEvent({ ...baseEvent, event_type: "file.uploaded" }, t).category,
+    ).toBe("document");
+    expect(
+      formatActivityEvent({ ...baseEvent, event_type: "file.replaced" }, t).category,
+    ).toBe("document");
+    expect(
+      formatActivityEvent({ ...baseEvent, event_type: "file.updated" }, t).category,
     ).toBe("document");
   });
 
