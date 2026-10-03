@@ -5,6 +5,55 @@ All notable changes to Turbo EA are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.157.0] - 2026-10-03
+
+### Added
+
+- **A Source column on the Risk Register** shows whether a risk was entered by hand, promoted from a compliance finding or filed by an extension. It can be hidden from the Columns tab, follows the sidebar's Source filter, and lands in the Excel export.
+
+### Changed
+
+- **Automated test coverage now stands at 93% of the backend and 70% of the frontend.**
+
+### Fixed
+- A change in the card layout editor that the server rejects now shows an error at the top of the editor instead of failing silently and leaving the stale layout on screen.
+- Pressing Escape to dismiss the formula editor's suggestion list no longer closes the whole calculation dialog and discards the form.
+- Typing `.` right after accepting a formula suggestion (for example `data`) now opens the field list at once instead of swallowing the keystroke.
+
+- **A risk filed by an extension shows its source as *Extension* on its detail page, in its PDF, under the register's Source filter and in the new Source column.** The API coerced every source outside `manual` / `compliance` to `manual`, so such a risk read as hand-entered and the filter's *Extension* option never matched it.
+- **Re-importing an updated platform export no longer duplicates documents and comments.** The migration importer inserted every staged document and comment unconditionally, so each re-import of a LeanIX export added another copy of every link and every comment on the cards it refreshed. Both are now matched on the source's own id (and on the card plus URL, or the author plus text, when the identity map was wiped) and updated or skipped instead; a renamed document keeps its one entry.
+- **A platform migration no longer creates a user from a malformed email address.** A subscription whose address the preview had already flagged as malformed (an unsplit `a@x.com;b@x.com` cell, a display name) was still turned into a deactivated user at apply time; the row is now counted as a conflict and skipped, as the preview says.
+- **Archived entities imported with *Also import archived entities* land archived.** They were created as live cards whatever the source said; they now carry the archived status, and an existing card is never archived by a re-import.
+- **A migrated custom field whose key already exists on the target card type is not added again.** The *Imported from* section only checked itself for duplicates, so a custom field sharing a key with a field in another section gave the type two fields reading one value.
+- **ServiceNow sync runs record their counts.** The created / updated / skipped / deleted / error counts of a pull and every count of a push were kept in memory only, so the Sync runs list showed `fetched` alone for a pull and zeros for a push, however much had been synced.
+- **Editing a ServiceNow mapping's field list returns the list just saved.** The response to the save, and the dialog it refreshed, still showed the rows it had just replaced until the page was reloaded.
+- **A TurboLens vendor analysis no longer fails when the model's answer is cut off.** A truncated batch whose only complete entry was the first one was read as a single object instead of a list and the run ended with an error; the parser now follows the shape the answer opened with, and both the vendor analysis and the vendor resolution read an answer that is a single object as one entry instead of failing.
+- **The Architecture AI no longer proposes a capability link twice.** When the model had already linked a new application to one of the capabilities chosen in the Business Requirements step, the guardrail that makes every new application support a capability added the same link again, and committing the proposal created the relation twice.
+- **A compliance scan keeps a card the user marked as not AI-bearing out of scope.** The EU AI Act detector accepted any card id in the model's answer, so a card deliberately left out of the question could be put back in scope by the model naming it anyway, and a made-up id could fail the whole scan; it now only takes answers about the cards it asked about.
+- **Removing a line the diagram's stale check flagged no longer asks whether to delete its relation.** The relation had already been deleted in the inventory; the editor consumed its own suppression on the first report of the removal and DrawIO's change diff reported the same removal a second time, so the *delete this relation?* confirmation came up for a relation that no longer existed. Every removal is now reported once. The re-parent check the editor schedules after a drag also no longer runs once the editor has been closed.
+- **A custom Statement of Architecture Work section placed after a hidden or empty template section is no longer dropped from the preview, the PDF and the Word export.** The editor listed it under its anchor while the exports skipped the anchor and the section with it; it now prints at the anchor's position whether or not the template section does. The preview's signature cards also fall back to the document's approval date when a signatory row carries none, as the PDF footer already did.
+- **Starting a new TurboLens analysis or compliance scan while an earlier run's status request was still in flight no longer stops the new run's progress polling.** A late reply for the superseded run is ignored instead of ending the loop and reporting the new run as finished.
+- **The compliance regulations list survives a failed refresh.** Saving a regulation re-fetches the list; when that request failed, the page showed no regulations at all until it was reloaded instead of keeping the ones it had.
+- **Extension-granted metamodel authoring no longer stays hidden for the whole session after one failed status read.** A transient error on the extension status request at boot was remembered as *no grants*; the next page that needs the answer now asks again.
+- **The two messages shown when a TurboLens analysis or compliance scan fails, or its status cannot be fetched, are translated.** They were English in every language.
+- **Importing an Excel sheet whose card ids are written in upper case updates the cards instead of creating copies.** A UUID is case-insensitive, but the importer matched ids character for character, so a workbook edited in a tool that upper-cases them reported every card as unknown and created a duplicate of each.
+- **The Excel importer rejects a row whose parent path is its own card, and a row with an invalid lifecycle date no longer counts as a card to create.** The self-parent check compared two paths that could never be equal, so such a row went through as an update that would have made the card its own parent; the date error was reported but the row stayed in the preview's create count.
+- **A report export to Excel no longer hangs when two tables share a heading of 31 characters or more.** Excel caps a sheet name at 31 characters; the second sheet's name was suffixed and cut back to the same 31 characters, forever. The name is now shortened to make room for the suffix.
+- **Numbers in a report export are read the way the page shows them.** A right-aligned cell holding `n/a` exported as 0, an accounting negative `(500)` lost its sign, and a thousands separator or decimal comma written by a German or French locale was mis-read; the exporter now parses with the locale's own separators and keeps text that holds no number as text.
+- **A paginated PowerPoint export falls back to one slide when the browser offers no 2D canvas, instead of failing.**
+- **The Risk Register and a risk's detail page match the viewer's rights.** A user holding only `risks.view` saw Create and Import on the register and an enabled Delete button, editable fields and the workflow buttons on a risk, and only the server's refusal stopped the write; those controls are now hidden or disabled without `risks.manage`, while an assignee can still complete their own mitigation occurrence. The compliance scanner likewise hands its grid the viewer's `compliance.manage` right instead of assuming it, so a viewer no longer sees Create, Delete, the bulk decisions or an enabled scan button.
+- **The Risk Register's search box no longer re-queries on every keystroke, and a reply for an earlier search can no longer overwrite the current one.** The search is sent after a short pause, and a late reply for a superseded filter set is dropped.
+- **The Risk Register's *Average level* tile is translated.** It showed the level's key (`critical`) instead of its label.
+- **A risk that cannot be read, and a status change the workflow refuses, are reported in the user's language.** Both messages were English in every language; the compliance findings' CSV export headers and its Yes / No cells are translated too.
+- **A survey's number or cost box stays empty after it is cleared.** Clearing it stored *no value*, which the box read as *untouched* and filled back with the current value, so the next digit typed was appended to the old number.
+- **Opening a survey response the server has nothing for shows *not found* instead of a raw error.**
+- **A new Statement of Architecture Work shows its Preview and Request-signatures buttons as soon as it is saved.** The editor only rewrote the address bar, so the page kept its new-document header and the two buttons stayed hidden until a reload.
+- **A ServiceNow field mapping typed as a Turbo EA field path is saved as that path.** Once the typed text matched a known field, the row's picker rewrote its text to `path — Label` and that label was saved as the path, so an `attributes.*` mapping pointed at an attribute that does not exist; picking from the list was unaffected.
+- **A reference-catalogue import that fails part-way reports what landed.** When a later batch failed, the error replaced the summary of the batches already created, and the catalogue was not reloaded, so the created cards still read as missing until the page was refreshed.
+- **Clearing a card type's description in the metamodel admin saves the empty value.** The save sent nothing for an emptied description, so the previous text came back.
+- **A survey's results page shows the server's error when the survey cannot be loaded** instead of reporting it as not found.
+- **The Resources and Audit log admin pages drop a reply that arrives for a filter you have since changed**, so a slow page of results can no longer replace the page you asked for last.
+
 ## [2.156.1] - 2026-10-01
 
 ### Fixed

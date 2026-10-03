@@ -19,6 +19,12 @@ htmlcov/
 .cache
 nosetests.xml
 coverage.xml
+# Vitest coverage output and diff-cover's markdown report (ci.yml)
+frontend/coverage/
+# Per-shard hand-offs to the aggregate CI jobs (ci.yml)
+frontend/.vitest-reports/
+backend/coverage.shard-*
+diff-cover.md
 *.cover
 *.py,cover
 .hypothesis/
@@ -104,3 +110,8 @@ crash.log
 deploy/terraform/**/*.tfvars
 !deploy/terraform/**/*.tfvars.example
 *.auto.tfvars
+
+# Browser smoke suite (frontend/e2e): reports, traces and the saved sign-in (the DrawIO clone lands in .cache/, ignored above)
+frontend/playwright-report/
+frontend/test-results/
+frontend/e2e/.auth/

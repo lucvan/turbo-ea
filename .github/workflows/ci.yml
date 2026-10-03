@@ -35,6 +35,7 @@ jobs:
       helm: ${{ steps.filter.outputs.helm == 'true' || steps.filter.outputs.ci == 'true' }}
       deploy: ${{ steps.filter.outputs.deploy == 'true' || steps.filter.outputs.ci == 'true' }}
       terraform: ${{ steps.filter.outputs.terraform == 'true' || steps.filter.outputs.ci == 'true' }}
+      e2e: ${{ steps.filter.outputs.e2e == 'true' || steps.filter.outputs.ci == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -88,6 +89,25 @@ jobs:
             terraform:
               - 'deploy/terraform/**'
               - 'scripts/check_deploy_versions.py'
+            # The browser smoke suite: its own files, the frontend build inputs
+            # and the five widget features it drives (frontend/e2e/README in
+            # CLAUDE.md's Testing Conventions). The Dockerfile pins the DrawIO
+            # tag the suite installs.
+            e2e:
+              - 'frontend/e2e/**'
+              - 'frontend/playwright.config.ts'
+              - 'frontend/package.json'
+              - 'frontend/package-lock.json'
+              - 'frontend/vite.config.ts'
+              - 'frontend/drawio-config/**'
+              - 'frontend/src/features/diagrams/**'
+              - 'frontend/src/features/bpm/**'
+              - 'frontend/src/features/ppm/**'
+              - 'frontend/src/features/reports/**'
+              - 'frontend/src/features/admin/metamodel/**'
+              - 'frontend/src/features/admin/MetamodelAdmin.tsx'
+              - 'scripts/e2e/**'
+              - 'Dockerfile'
             ci:
               - '.github/workflows/**'
 
@@ -128,15 +148,33 @@ jobs:
         working-directory: backend
 
   # Integration suite — exercises the full HTTP stack against a real
-  # Postgres. Slow (~15 min). Informational by default so PRs aren't
-  # blocked on it; flip continue-on-error to false (or remove the line)
-  # to make it required again.
-  backend-test-integration:
-    name: Backend Integration Tests
+  # Postgres. It is the only job that runs tests/api/, i.e. most of the
+  # backend suite, so it blocks: it ran as informational
+  # (continue-on-error) until 2026-10, which meant a red API suite could not
+  # stop a merge on its own.
+  #
+  # The suite (~6,400 tests) took 16 min of pytest on one 4-core runner even
+  # with `-n auto`, so it runs as four shards on four runners (~4 min each)
+  # and the aggregate job below combines their coverage. `--shard K/N` is a
+  # hook in backend/tests/shard_plugin.py (imported by tests/conftest.py)
+  # that deals every test FILE to one shard, largest first into the lightest
+  # shard, so the shards partition the suite exactly and are balanced. A
+  # shard measures coverage but neither reports nor gates on it: the
+  # suite-wide floor (`fail_under` in backend/pyproject.toml) and the
+  # diff-coverage gate only mean something on the combined data. The matrix
+  # is the ONLY place the shard count is set: `strategy.job-total` carries it
+  # into the job name, the pytest command and the aggregate's count check.
+  backend-test-shards:
+    name: Backend Integration Tests (shard ${{ matrix.shard }}/${{ strategy.job-total }})
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    outputs:
+      count: ${{ steps.meta.outputs.count }} # every leg writes the same value
     services:
       postgres:
         image: postgres:16-alpine
@@ -160,16 +198,22 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
       - run: pip install -e ".[dev]"
         working-directory: backend
-      - name: Run all tests with coverage
-        # Runs the full suite (unit + integration) so the 40% coverage gate
-        # reflects total covered code, not just what tests/api/ exercises.
-        # The unit subset is also run by the fast Backend Unit Tests job
-        # for quick PR feedback — the duplication here costs ~30s out of
-        # the integration job and keeps coverage meaningful.
-        # `-n auto` enables pytest-xdist parallelism — conftest.py allocates
-        # a per-worker Postgres schema (test_gw0, test_gw1, ...) so workers
-        # don't collide on the savepoint-rollback fixture.
-        run: python -m pytest -n auto --cov=app --cov-report=term-missing --cov-fail-under=40 -q
+      - id: meta
+        run: echo "count=${{ strategy.job-total }}" >> "$GITHUB_OUTPUT"
+      - name: Run shard ${{ matrix.shard }} of ${{ strategy.job-total }} with coverage
+        # The shard holds its quarter of the full suite (unit + integration)
+        # so the combined coverage reflects total covered code, not just what
+        # tests/api/ exercises; the unit subset is also run by the fast
+        # Backend Unit Tests job for quick PR feedback.
+        # `-n auto` enables pytest-xdist parallelism within the shard —
+        # conftest.py allocates a per-worker Postgres schema (test_gw0,
+        # test_gw1, ...) so workers don't collide on the savepoint-rollback
+        # fixture. `--cov-report=` skips the per-shard report and
+        # `--cov-fail-under=0` the per-shard floor; both belong to the
+        # aggregate job.
+        run: >-
+          python -m pytest -n auto --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --cov=app --cov-report= --cov-fail-under=0 -q
         working-directory: backend
         env:
           POSTGRES_HOST: localhost
@@ -177,6 +221,87 @@ jobs:
           POSTGRES_USER: turboea
           POSTGRES_PASSWORD: turboea
           TEST_POSTGRES_DB: turboea_test
+      - name: Hand the coverage data to the aggregate job
+        # Not a dotfile: upload-artifact skips hidden files by default.
+        run: mv .coverage "coverage.shard-${{ matrix.shard }}"
+        working-directory: backend
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: backend-coverage-${{ matrix.shard }}
+          path: backend/coverage.shard-${{ matrix.shard }}
+          if-no-files-found: error
+          overwrite: true # "Re-run failed jobs" uploads the same name again
+          retention-days: 1
+
+  # The required check (CONTRIBUTING.md, branch protection table). It
+  # combines the shards' coverage data, enforces the suite-wide floor and the
+  # diff-coverage gate, and writes the per-file table to the job summary.
+  # It must RUN when a shard fails, and fail itself: `needs` alone would skip
+  # it, and branch protection treats a skipped required check as passing.
+  # When the backend did not change, `changes` gates it off exactly as before.
+  backend-test-integration:
+    name: Backend Integration Tests
+    needs: [changes, backend-test-shards]
+    if: always() && needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every shard must have passed
+        run: |
+          echo "shard jobs: ${{ needs.backend-test-shards.result }}"
+          test "${{ needs.backend-test-shards.result }}" = "success"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # diff-cover needs the merge base with the base branch
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # coverage reads [tool.coverage.*] from backend/pyproject.toml; the
+      # report needs the sources checked out above, the data comes from the
+      # shards.
+      - run: pip install "coverage[toml]>=7" diff-cover==10.6.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: backend-coverage-*
+          merge-multiple: true
+          path: backend
+      - name: Combine the shards' coverage and enforce the floor
+        # A missing artifact is silent at download, so the count is checked
+        # first: a shard whose data never arrived would otherwise drop its
+        # files from the total. `coverage report` exits non-zero when the
+        # total is under `fail_under` (backend/pyproject.toml — the one place
+        # it is set); `xml` would too, so it runs after. The XML report feeds
+        # the diff-coverage gate below.
+        run: |
+          expected="${{ needs.backend-test-shards.outputs.count }}"
+          found=$(ls coverage.shard-* | wc -l)
+          test "$found" -eq "$expected" || { echo "::error::$found of $expected shard data files"; exit 1; }
+          python -m coverage combine coverage.shard-*
+          python -m coverage report
+          python -m coverage xml
+        working-directory: backend
+      - name: Coverage summary
+        if: always()
+        # Informational (`--fail-under=0`): the floor was enforced above.
+        run: |
+          echo "## Backend coverage" >> "$GITHUB_STEP_SUMMARY"
+          python -m coverage report --format=markdown --skip-covered --sort=-miss --fail-under=0 \
+            >> "$GITHUB_STEP_SUMMARY" || echo "No coverage data." >> "$GITHUB_STEP_SUMMARY"
+        working-directory: backend
+      # Every change must be tested (CLAUDE.md, Testing Conventions): the
+      # lines a PR adds or changes must themselves be ≥ 80% covered, whatever
+      # the suite-wide total. diff-cover runs offline against the base branch;
+      # a line it cannot attribute to the PR is not counted. Push-to-main has
+      # no base to diff against, so the step runs on pull requests only. The
+      # diff is base...HEAD, so the checkout above keeps the full history: a
+      # shallow clone has no merge base and diff-cover aborts before reporting.
+      - name: Diff coverage (changed lines must be tested)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          diff-cover coverage.xml --compare-branch="origin/${{ github.base_ref }}" \
+            --fail-under=80 --format markdown:diff-cover.md
+          cat diff-cover.md >> "$GITHUB_STEP_SUMMARY"
+        working-directory: backend
 
   backend-typecheck:
     name: Backend Type Check
@@ -389,11 +514,27 @@ jobs:
       - run: npm run build
         working-directory: frontend
 
-  frontend-test:
-    name: Frontend Tests
+  # The Vitest suite (~6,100 tests) took 9 min on one 4-core runner, so it
+  # runs as three shards on three runners and the aggregate job below merges
+  # their results and coverage. Vitest's own `--shard` assigns every test
+  # file to one shard by a stable hash of its path; `--reporter=blob` writes
+  # the results AND the raw coverage map to .vitest-reports/ for the merge.
+  # Vitest checks the coverage thresholds on every run, sharded or not, so a
+  # shard zeroes them — a third of the suite cannot meet the suite-wide floors
+  # in frontend/vitest.config.ts; the merge run enforces them. The matrix is
+  # the ONLY place the shard count is set: `strategy.job-total` carries it
+  # into the job name, the vitest command and the aggregate's count check.
+  frontend-test-shards:
+    name: Frontend Tests (shard ${{ matrix.shard }}/${{ strategy.job-total }})
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    outputs:
+      count: ${{ steps.meta.outputs.count }} # every leg writes the same value
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -403,10 +544,184 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
         working-directory: frontend
-      - run: npx vitest run --coverage.enabled --coverage.reporter=text
+      - id: meta
+        run: echo "count=${{ strategy.job-total }}" >> "$GITHUB_OUTPUT"
+      - name: Run shard ${{ matrix.shard }} of ${{ strategy.job-total }} with coverage
+        # `--reporter=default` keeps the console output a failing shard
+        # needs; `blob` alone prints nothing.
+        run: >-
+          npx vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --reporter=default --reporter=blob --coverage.enabled
+          --coverage.thresholds.lines=0 --coverage.thresholds.statements=0
+          --coverage.thresholds.branches=0 --coverage.thresholds.functions=0
+        working-directory: frontend
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frontend-blob-${{ matrix.shard }}
+          path: frontend/.vitest-reports/
+          if-no-files-found: error
+          include-hidden-files: true # the directory is a dotdir
+          overwrite: true # "Re-run failed jobs" uploads the same name again
+          retention-days: 1
+
+  # The required check (CONTRIBUTING.md, branch protection table). Same
+  # shape as Backend Integration Tests: it must RUN when a shard fails and
+  # fail itself, because a skipped required check reads as passing.
+  frontend-test:
+    name: Frontend Tests
+    needs: [changes, frontend-test-shards]
+    if: always() && needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every shard must have passed
+        run: |
+          echo "shard jobs: ${{ needs.frontend-test-shards.result }}"
+          test "${{ needs.frontend-test-shards.result }}" = "success"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # diff-cover needs the merge base with the base branch
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # vitest and @vitest/coverage-v8 do the merge, so the install is needed.
+      - run: npm ci
+        working-directory: frontend
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: frontend-blob-*
+          merge-multiple: true
+          path: frontend/.vitest-reports
+      - name: Merge the shards' results and coverage, enforce the floors
+        # A missing blob is silent at download, so the count is checked first.
+        # The merge re-emits the reporters configured in
+        # frontend/vitest.config.ts (text, lcov, json-summary) from the merged
+        # coverage map and checks the thresholds there.
+        run: |
+          expected="${{ needs.frontend-test-shards.outputs.count }}"
+          found=$(ls .vitest-reports/blob-*.json | wc -l)
+          test "$found" -eq "$expected" || { echo "::error::$found of $expected shard reports"; exit 1; }
+          npx vitest run --merge-reports --coverage.enabled
+        working-directory: frontend
+      - name: Coverage summary
+        if: always()
+        run: |
+          echo "## Frontend coverage" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f coverage/coverage-summary.json ]; then
+            jq -r '.total | "| | Covered | Total | % |\n|---|---|---|---|",
+              (to_entries[] | "| \(.key) | \(.value.covered) | \(.value.total) | \(.value.pct) |")' \
+              coverage/coverage-summary.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No coverage data." >> "$GITHUB_STEP_SUMMARY"
+          fi
+        working-directory: frontend
+      # Same gate as the backend job: the lines a PR touches must be ≥ 80%
+      # covered. diff-cover reads the LCOV report vitest.config.ts emits.
+      - name: Diff coverage (changed lines must be tested)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          pip install diff-cover==10.6.0
+          diff-cover coverage/lcov.info --compare-branch="origin/${{ github.base_ref }}" \
+            --fail-under=80 --format markdown:diff-cover.md
+          cat diff-cover.md >> "$GITHUB_STEP_SUMMARY"
         working-directory: frontend
 
   # ── MCP Server ───────────────────────────────────────────────────────
+  # The browser smoke suite: the diagram editor, the BPMN modeler, the Gantt,
+  # the dependency view and the metamodel graph in a real Chromium, against a
+  # backend booted with the demo seed and the built SPA served by
+  # `vite preview` (which proxies /api to the backend). The backend starts
+  # first so its seed, a few minutes cold, overlaps the frontend build. The
+  # DrawIO editor is the build the image ships, installed by
+  # scripts/e2e/install-drawio.sh from the tag the Dockerfile pins. No
+  # `continue-on-error`: a red run blocks like every other test job.
+  frontend-e2e:
+    name: Frontend E2E
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
+    # Pinned, not `ubuntu-latest`: `playwright install --with-deps` installs
+    # Chromium's system libraries from a per-release apt list, and a runner
+    # image Playwright does not know yet fails that step. `ubuntu-latest`
+    # moves to Ubuntu 26 on 2026-10-19 (actions/runner-images#14748); move
+    # this pin once the pinned @playwright/test lists the new release.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: turboea
+          POSTGRES_PASSWORD: turboea
+          POSTGRES_DB: turboea
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U turboea -d turboea"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - run: pip install -e .
+        working-directory: backend
+      - name: Start the backend with the demo data
+        run: nohup uvicorn app.main:app --port 8000 > "$RUNNER_TEMP/uvicorn.log" 2>&1 &
+        working-directory: backend
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_DB: turboea
+          POSTGRES_USER: turboea
+          POSTGRES_PASSWORD: turboea
+          SEED_DEMO: "true"
+          ENVIRONMENT: development
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - name: Install the DrawIO build the image ships
+        run: scripts/e2e/install-drawio.sh frontend/dist/drawio
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Wait for the backend
+        # /api/health answers only once the lifespan — migrations and the
+        # demo seed — has finished.
+        run: |
+          for _ in $(seq 1 72); do
+            if curl -fsS http://localhost:8000/api/health > /dev/null; then exit 0; fi
+            sleep 5
+          done
+          echo "the backend did not come up in 6 minutes"
+          tail -n 60 "$RUNNER_TEMP/uvicorn.log"
+          exit 1
+      - run: npx playwright test
+        working-directory: frontend
+      - name: Upload traces, screenshots and the backend log
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frontend-e2e
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+            ${{ runner.temp }}/uvicorn.log
+          if-no-files-found: ignore
+      - name: Backend log tail
+        if: always()
+        run: tail -n 40 "$RUNNER_TEMP/uvicorn.log" || true
+
   mcp-test:
     name: MCP Server Tests
     needs: changes
@@ -414,6 +729,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # diff-cover needs the merge base with the base branch
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -421,7 +738,24 @@ jobs:
           cache-dependency-path: mcp-server/pyproject.toml
       - run: pip install -e ".[dev]"
         working-directory: mcp-server
-      - run: python -m pytest -q
+      # The coverage floor is `fail_under` in mcp-server/pyproject.toml.
+      - run: python -m pytest -q --cov=turbo_ea_mcp --cov-report=term-missing --cov-report=xml
+        working-directory: mcp-server
+      - name: Coverage summary
+        if: always()
+        run: |
+          echo "## MCP server coverage" >> "$GITHUB_STEP_SUMMARY"
+          python -m coverage report --format=markdown --skip-covered --sort=-miss \
+            >> "$GITHUB_STEP_SUMMARY" || echo "No coverage data." >> "$GITHUB_STEP_SUMMARY"
+        working-directory: mcp-server
+      - name: Diff coverage (changed lines must be tested)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          pip install diff-cover==10.6.0
+          diff-cover coverage.xml --compare-branch="origin/${{ github.base_ref }}" \
+            --fail-under=80 --format markdown:diff-cover.md
+          cat diff-cover.md >> "$GITHUB_STEP_SUMMARY"
         working-directory: mcp-server
 
   # ── OpenAPI Spec (auto-regenerated for the docs site) ────────────────
