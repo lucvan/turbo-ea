@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
   "label": "MCP server coverage",
-  "message": "77%",
-  "color": "yellowgreen"
+  "message": "86%",
+  "color": "green"
 }
