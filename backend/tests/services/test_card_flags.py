@@ -44,6 +44,11 @@ def test_a_card_touched_earlier_on_the_cutoff_day_is_not_stale():
     assert day_before < cutoff
 
 
+def test_a_naive_now_reads_as_utc():
+    naive = datetime(2026, 8, 25, 13, 0)
+    assert staleness_cutoff(30, "days", now=naive) == datetime(2026, 7, 26, tzinfo=timezone.utc)
+
+
 @pytest.mark.parametrize("unit", STALENESS_UNITS)
 def test_cutoff_is_midnight_not_the_current_time_of_day(unit):
     """The builder shows the admin a date, so the query must use one. A cutoff
@@ -251,3 +256,20 @@ def test_an_unknown_eol_bucket_names_itself():
     with pytest.raises(ValueError) as exc:
         eol_bucket_condition("nope")
     assert str(exc.value) == "Unknown EOL bucket: nope"
+
+
+class _UtcOnlyClock(datetime):
+    """UTC already says 1 October; the host's local clock still says 30 September."""
+
+    @classmethod
+    def now(cls, tz=None):
+        if tz is timezone.utc:
+            return datetime(2025, 10, 1, 0, 30, tzinfo=timezone.utc)
+        return datetime(2025, 9, 30, 20, 30)
+
+
+def test_without_a_now_the_cutoff_counts_from_today_in_utc(monkeypatch):
+    from app.services import card_flags
+
+    monkeypatch.setattr(card_flags, "datetime", _UtcOnlyClock)
+    assert staleness_cutoff(30, "days") == datetime(2025, 9, 1, tzinfo=timezone.utc)
