@@ -141,9 +141,7 @@ describe("PpmRiskTab — create, edit, delete", () => {
     await user.click(within(dialog).getByRole("combobox", { name: "Owner" }));
     await user.click(await screen.findByRole("option", { name: "grace@example.com" }));
 
-    // The status Select's label is not linked by `labelId`, so its combobox
-    // has no accessible name; it is the one showing the current status.
-    await user.click(within(dialog).getByText("Open", { selector: '[role="combobox"]' }));
+    await user.click(within(dialog).getByRole("combobox", { name: "Status" }));
     await user.click(await screen.findByRole("option", { name: "Mitigated" }));
 
     expect(save).toBeEnabled();
@@ -167,7 +165,7 @@ describe("PpmRiskTab — create, edit, delete", () => {
     const { user, onRefresh } = renderTab();
     // Let the user list land so the owner autocomplete can show its value.
     await waitFor(() => expect(mockApi.callsOf("get", "/users")).toHaveLength(1));
-    await user.click(within(rowOf("Vendor lock-in")).getByRole("button", { name: "edit" }));
+    await user.click(within(rowOf("Vendor lock-in")).getByRole("button", { name: "Edit" }));
 
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText("Edit Risk")).toBeInTheDocument();
@@ -197,7 +195,7 @@ describe("PpmRiskTab — create, edit, delete", () => {
 
   it("deletes a risk and refreshes the parent", async () => {
     const { user, onRefresh } = renderTab();
-    await user.click(within(rowOf("Late delivery")).getByRole("button", { name: "delete" }));
+    await user.click(within(rowOf("Late delivery")).getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(mockApi.callsOf("delete", "/ppm/risks/r3")).toHaveLength(1));
     await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
   });
@@ -260,7 +258,7 @@ describe("PpmRiskTab — labels and bands", () => {
 describe("PpmRiskTab — dialog form", () => {
   it("edits a risk with no description or mitigation as empty fields, sent back as null", async () => {
     const { user } = renderTab();
-    await user.click(within(rowOf("Late delivery")).getByRole("button", { name: "edit" }));
+    await user.click(within(rowOf("Late delivery")).getByRole("button", { name: "Edit" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("textbox", { name: "Description" })).toHaveValue("");
     expect(within(dialog).getByRole("textbox", { name: "Mitigation" })).toHaveValue("");
@@ -280,7 +278,7 @@ describe("PpmRiskTab — dialog form", () => {
 
   it("opens a blank form after an edit was cancelled", async () => {
     const { user } = renderTab();
-    await user.click(within(rowOf("Vendor lock-in")).getByRole("button", { name: "edit" }));
+    await user.click(within(rowOf("Vendor lock-in")).getByRole("button", { name: "Edit" }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
@@ -292,7 +290,7 @@ describe("PpmRiskTab — dialog form", () => {
     expect(within(dialog).getByText("Probability: 3")).toBeInTheDocument();
     expect(within(dialog).getByText("Impact: 3")).toBeInTheDocument();
     expect(within(dialog).getByText("Risk Score: 9")).toBeInTheDocument();
-    expect(within(dialog).getByText("Open", { selector: '[role="combobox"]' })).toBeInTheDocument();
+    expect(within(dialog).getByRole("combobox", { name: "Status" })).toHaveTextContent("Open");
     expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
@@ -312,7 +310,9 @@ describe("PpmRiskTab — dialog form", () => {
     // The floating label, and the same text sizing the outline's notch.
     expect(within(dialog).getByText("Status", { selector: "label" })).toBeInTheDocument();
     expect(within(dialog).getByText("Status", { selector: "legend span" })).toBeInTheDocument();
-    await user.click(within(dialog).getByText("Open", { selector: '[role="combobox"]' }));
+    const status = within(dialog).getByRole("combobox", { name: "Status" });
+    expect(status).toHaveTextContent("Open");
+    await user.click(status);
     const options = await screen.findAllByRole("option");
     expect(options.map((o) => o.textContent)).toEqual([
       "Open",
@@ -343,6 +343,112 @@ describe("PpmRiskTab — dialog form", () => {
       const dialog = screen.getByRole("dialog");
       expect(within(dialog).getByRole("button", { name: "Abbrechen" })).toBeInTheDocument();
       expect(within(dialog).getByRole("button", { name: "Speichern" })).toBeInTheDocument();
+    } finally {
+      await act(async () => {
+        await i18n.changeLanguage("en");
+      });
+    }
+  });
+});
+
+describe("PpmRiskTab — failed writes", () => {
+  it("keeps the dialog open and says why when creating a risk fails", async () => {
+    mockApi.fail("post", createPath, 500);
+    const { user, onRefresh } = renderTab();
+    await user.click(screen.getByRole("button", { name: /Add Risk/ }));
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByRole("textbox", { name: "Risk Title" }), "Scope creep");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert).toHaveTextContent(`POST ${createPath} failed`);
+    expect(alert).toHaveStyle({ marginBottom: "8px" });
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(onRefresh).not.toHaveBeenCalled();
+  });
+
+  it("keeps the dialog open and says why when saving an edit fails", async () => {
+    mockApi.fail("patch", "/ppm/risks/r3", 422);
+    const { user, onRefresh } = renderTab();
+    await user.click(within(rowOf("Late delivery")).getByRole("button", { name: "Edit" }));
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("PATCH /ppm/risks/r3 failed");
+    expect(onRefresh).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a generic message when a save fails without one", async () => {
+    mockApi.on("post", createPath, () => Promise.reject("network down"));
+    const { user } = renderTab();
+    await user.click(screen.getByRole("button", { name: /Add Risk/ }));
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByRole("textbox", { name: "Risk Title" }), "Scope creep");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Something went wrong");
+  });
+
+  it("opens the dialog again without the previous attempt's error", async () => {
+    mockApi.fail("patch", "/ppm/risks/r3", 422);
+    const { user } = renderTab();
+    await user.click(within(rowOf("Late delivery")).getByRole("button", { name: "Edit" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }));
+    await within(screen.getByRole("dialog")).findByRole("alert");
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: /Add Risk/ }));
+    expect(within(screen.getByRole("dialog")).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows a failed delete above the table, until the next delete succeeds", async () => {
+    mockApi.fail("delete", "/ppm/risks/r3", 409);
+    const { user, onRefresh } = renderTab();
+    await user.click(within(rowOf("Late delivery")).getByRole("button", { name: "Delete" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("DELETE /ppm/risks/r3 failed");
+    expect(alert).toHaveStyle({ marginBottom: "16px" });
+    expect(alert.compareDocumentPosition(screen.getByRole("table"))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(onRefresh).not.toHaveBeenCalled();
+
+    await user.click(within(rowOf("Budget overrun")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("dismisses a failed delete", async () => {
+    mockApi.fail("delete", "/ppm/risks/r3", 409);
+    const { user } = renderTab();
+    await user.click(within(rowOf("Late delivery")).getByRole("button", { name: "Delete" }));
+    const alert = await screen.findByRole("alert");
+    await user.click(within(alert).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+});
+
+describe("PpmRiskTab — accessible names", () => {
+  it("names every row's edit and delete buttons", () => {
+    renderTab();
+    for (const title of ["Vendor lock-in", "Budget overrun", "Late delivery"]) {
+      expect(within(rowOf(title)).getByRole("button", { name: "Edit" })).toBeInTheDocument();
+      expect(within(rowOf(title)).getByRole("button", { name: "Delete" })).toBeInTheDocument();
+    }
+  });
+
+  it("names the description field and the row buttons in the user's language", async () => {
+    await act(async () => {
+      await i18n.changeLanguage("de");
+    });
+    try {
+      const { user } = renderTab();
+      expect(within(rowOf("Late delivery")).getByRole("button", { name: "Löschen" })).toBeInTheDocument();
+      await user.click(within(rowOf("Late delivery")).getByRole("button", { name: "Bearbeiten" }));
+      expect(
+        within(screen.getByRole("dialog")).getByRole("textbox", { name: "Beschreibung" }),
+      ).toBeInTheDocument();
     } finally {
       await act(async () => {
         await i18n.changeLanguage("en");

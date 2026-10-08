@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
@@ -62,6 +63,9 @@ export default function PpmRiskTab({ initiativeId, risks, onRefresh }: Props) {
     open: false,
   });
   const [users, setUsers] = useState<UserOption[]>([]);
+  // A failed save, shown in the dialog; a failed delete, shown above the table.
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -75,6 +79,9 @@ export default function PpmRiskTab({ initiativeId, risks, onRefresh }: Props) {
   useEffect(() => {
     api.get<UserOption[]>("/users").then(setUsers).catch(() => {});
   }, []);
+
+  const errorText = (err: unknown) =>
+    err instanceof Error ? err.message : t("common:errors.generic");
 
   const openRisks = risks.filter((r) => r.status === "open").length;
   const highRisks = risks.filter((r) => r.risk_score >= 15).length;
@@ -101,6 +108,7 @@ export default function PpmRiskTab({ initiativeId, risks, onRefresh }: Props) {
         status: "open",
       });
     }
+    setSaveError(null);
     setDialog({ open: true, item });
   };
 
@@ -110,17 +118,28 @@ export default function PpmRiskTab({ initiativeId, risks, onRefresh }: Props) {
       description: form.description || null,
       mitigation: form.mitigation || null,
     };
-    if (dialog.item) {
-      await api.patch(`/ppm/risks/${dialog.item.id}`, payload);
-    } else {
-      await api.post(`/ppm/initiatives/${initiativeId}/risks`, payload);
+    try {
+      if (dialog.item) {
+        await api.patch(`/ppm/risks/${dialog.item.id}`, payload);
+      } else {
+        await api.post(`/ppm/initiatives/${initiativeId}/risks`, payload);
+      }
+    } catch (err) {
+      setSaveError(errorText(err));
+      return;
     }
     setDialog({ open: false });
     onRefresh();
   };
 
   const handleDelete = async (id: string) => {
-    await api.delete(`/ppm/risks/${id}`);
+    setDeleteError(null);
+    try {
+      await api.delete(`/ppm/risks/${id}`);
+    } catch (err) {
+      setDeleteError(errorText(err));
+      return;
+    }
     onRefresh();
   };
 
@@ -177,6 +196,12 @@ export default function PpmRiskTab({ initiativeId, risks, onRefresh }: Props) {
           {t("addRisk")}
         </Button>
       </Box>
+
+      {deleteError && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setDeleteError(null)}>
+          {deleteError}
+        </Alert>
+      )}
 
       {/* Table */}
       <TableContainer
@@ -254,11 +279,16 @@ export default function PpmRiskTab({ initiativeId, risks, onRefresh }: Props) {
                 </TableCell>
                 <TableCell>
                   <Box display="flex" gap={0.5}>
-                    <IconButton size="small" onClick={() => handleOpen(risk)}>
+                    <IconButton
+                      size="small"
+                      aria-label={t("common:actions.edit")}
+                      onClick={() => handleOpen(risk)}
+                    >
                       <MaterialSymbol icon="edit" size={16} />
                     </IconButton>
                     <IconButton
                       size="small"
+                      aria-label={t("common:actions.delete")}
                       onClick={() => handleDelete(risk.id)}
                     >
                       <MaterialSymbol icon="delete" size={16} />
@@ -293,6 +323,11 @@ export default function PpmRiskTab({ initiativeId, risks, onRefresh }: Props) {
             {dialog.item ? t("editRisk") : t("addRisk")}
           </DialogTitle>
           <DialogContent>
+            {saveError && (
+              <Alert severity="error" sx={{ mb: 1 }}>
+                {saveError}
+              </Alert>
+            )}
             <Box display="flex" flexDirection="column" gap={2} mt={1}>
               <TextField
                 label={t("riskTitle")}
@@ -302,7 +337,7 @@ export default function PpmRiskTab({ initiativeId, risks, onRefresh }: Props) {
                 size="small"
               />
               <TextField
-                label={t("common:description", "Description")}
+                label={t("common:labels.description")}
                 value={form.description}
                 onChange={(e) =>
                   setForm({ ...form, description: e.target.value })
@@ -373,8 +408,9 @@ export default function PpmRiskTab({ initiativeId, risks, onRefresh }: Props) {
                 size="small"
               />
               <FormControl size="small">
-                <InputLabel>{t("riskStatus")}</InputLabel>
+                <InputLabel id="ppm-risk-status-label">{t("riskStatus")}</InputLabel>
                 <Select
+                  labelId="ppm-risk-status-label"
                   value={form.status}
                   label={t("riskStatus")}
                   onChange={(e) =>

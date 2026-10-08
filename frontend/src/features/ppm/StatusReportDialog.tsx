@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Alert from "@mui/material/Alert";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -106,6 +107,7 @@ export default function StatusReportDialog({
   );
   const [nextSteps, setNextSteps] = useState(report?.next_steps || "");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSave = async () => {
     setSaving(true);
@@ -125,8 +127,8 @@ export default function StatusReportDialog({
         await api.post(`/ppm/initiatives/${initiativeId}/reports`, payload);
       }
       onSaved();
-    } catch {
-      // ignore
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("common:errors.generic"));
     } finally {
       setSaving(false);
     }
@@ -142,6 +144,11 @@ export default function StatusReportDialog({
     >
       <DialogTitle>{isEdit ? t("editReport") : t("addReport")}</DialogTitle>
       <DialogContent>
+        {error && (
+          <Alert severity="error" sx={{ mb: 1 }}>
+            {error}
+          </Alert>
+        )}
         <Box display="flex" flexDirection="column" gap={2.5} mt={1}>
           <DateField
             label={t("reportDate")}

@@ -75,6 +75,7 @@ describe("StatusReportDialog — new report", () => {
     expect(pressed("Schedule")).toEqual(["On Track"]);
     expect(pressed("Cost")).toEqual(["On Track"]);
     expect(pressed("Scope")).toEqual(["On Track"]);
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("posts the chosen health, date and texts, sending empty texts as null", async () => {
@@ -124,15 +125,28 @@ describe("StatusReportDialog — new report", () => {
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
-  it("stays open and re-enables saving when the request fails", async () => {
+  it("stays open, says why and re-enables saving when the request fails", async () => {
     mockApi.fail("post", createPath, 500);
     const { user, onSaved } = renderDialog();
-    const save = within(screen.getByRole("dialog")).getByRole("button", { name: "Add Report" });
+    const dialog = screen.getByRole("dialog");
+    const save = within(dialog).getByRole("button", { name: "Add Report" });
     await user.click(save);
-    await waitFor(() => expect(mockApi.callsOf("post", createPath)).toHaveLength(1));
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert).toHaveTextContent(`POST ${createPath} failed`);
+    expect(alert).toHaveStyle({ marginBottom: "8px" });
     await waitFor(() => expect(save).toBeEnabled());
+    expect(mockApi.callsOf("post", createPath)).toHaveLength(1);
     expect(onSaved).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBe(dialog);
+  });
+
+  it("falls back to a generic message when a save fails without one", async () => {
+    mockApi.on("post", createPath, () => Promise.reject("network down"));
+    const { user, onSaved } = renderDialog();
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Add Report" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Something went wrong");
+    expect(onSaved).not.toHaveBeenCalled();
   });
 
   it("closes through Cancel without saving", async () => {
@@ -170,6 +184,22 @@ describe("StatusReportDialog — editing", () => {
       next_steps: null,
     });
     expect(mockApi.callsOf("post")).toHaveLength(0);
+  });
+
+  it("says why when the patch fails, and saves on the next try", async () => {
+    mockApi.fail("patch", "/ppm/reports/rep1", 422);
+    const { user, onSaved } = renderDialog(REPORT);
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "PATCH /ppm/reports/rep1 failed",
+    );
+    expect(onSaved).not.toHaveBeenCalled();
+
+    mockApi.on("patch", "/ppm/reports/rep1", {});
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(mockApi.callsOf("patch", "/ppm/reports/rep1")).toHaveLength(2);
   });
 });
 

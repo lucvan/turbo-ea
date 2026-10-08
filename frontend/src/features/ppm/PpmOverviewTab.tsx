@@ -409,7 +409,7 @@ export default function PpmOverviewTab({
       {card.description && (
         <Paper sx={{ p: 2.5, gridColumn: { md: "1 / -1" } }}>
           <Typography variant="subtitle1" fontWeight={600} mb={1}>
-            {t("common:description", "Description")}
+            {t("common:labels.description")}
           </Typography>
           <Typography
             variant="body2"

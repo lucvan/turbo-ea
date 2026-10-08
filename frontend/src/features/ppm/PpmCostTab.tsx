@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
+import { useState, useMemo, lazy, Suspense } from "react";
+import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
@@ -26,6 +27,7 @@ import { useTranslation } from "react-i18next";
 import { DateField } from "@/components/DateField";
 import MaterialSymbol from "@/components/MaterialSymbol";
 import { api } from "@/api/client";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import { todayIsoDate } from "@/lib/dates";
 import { KPI_VALUE_SX } from "./ppmStyles";
 import { useFullScreenDialog } from "@/hooks/useFullScreenDialog";
@@ -37,6 +39,9 @@ import type { PpmCostLine, PpmBudgetLine } from "@/types";
 // pull Recharts into the PPM route chunk even for visitors who never open
 // this tab.
 const PpmCostCharts = lazy(() => import("./PpmCostCharts"));
+
+/** Stable stand-in until the budget lines have loaded. */
+const NO_BUDGET_LINES: PpmBudgetLine[] = [];
 
 interface Props {
   initiativeId: string;
@@ -50,8 +55,22 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
   const { fmt } = useCurrency();
   const { formatDate } = useDateFormat();
 
+  const errorText = (err: unknown) =>
+    err instanceof Error ? err.message : t("common:errors.generic");
+
   // ── Budget lines (planned) ──
-  const [budgetLines, setBudgetLines] = useState<PpmBudgetLine[]>([]);
+  const {
+    data: loadedBudgetLines,
+    error: budgetLoadError,
+    refetch: loadBudgets,
+  } = useApiQuery<PpmBudgetLine[]>(`/ppm/initiatives/${initiativeId}/budgets`);
+  const budgetLines = loadedBudgetLines ?? NO_BUDGET_LINES;
+  // A failed delete, shown above the table it failed in.
+  const [budgetListError, setBudgetListError] = useState<string | null>(null);
+  const [costListError, setCostListError] = useState<string | null>(null);
+  // A failed save, shown in the dialog it failed in.
+  const [budgetSaveError, setBudgetSaveError] = useState<string | null>(null);
+  const [costSaveError, setCostSaveError] = useState<string | null>(null);
   const [budgetDialog, setBudgetDialog] = useState<{
     open: boolean;
     item?: PpmBudgetLine;
@@ -73,17 +92,6 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
     actual: 0,
     date: "",
   });
-
-  const loadBudgets = useCallback(async () => {
-    const data = await api.get<PpmBudgetLine[]>(
-      `/ppm/initiatives/${initiativeId}/budgets`,
-    );
-    setBudgetLines(data);
-  }, [initiativeId]);
-
-  useEffect(() => {
-    loadBudgets();
-  }, [loadBudgets]);
 
   // ── KPIs ──
   const totalBudget = useMemo(
@@ -126,21 +134,33 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
         amount: 0,
       });
     }
+    setBudgetSaveError(null);
     setBudgetDialog({ open: true, item });
   };
 
   const handleBudgetSave = async () => {
-    if (budgetDialog.item) {
-      await api.patch(`/ppm/budgets/${budgetDialog.item.id}`, budgetForm);
-    } else {
-      await api.post(`/ppm/initiatives/${initiativeId}/budgets`, budgetForm);
+    try {
+      if (budgetDialog.item) {
+        await api.patch(`/ppm/budgets/${budgetDialog.item.id}`, budgetForm);
+      } else {
+        await api.post(`/ppm/initiatives/${initiativeId}/budgets`, budgetForm);
+      }
+    } catch (err) {
+      setBudgetSaveError(errorText(err));
+      return;
     }
     setBudgetDialog({ open: false });
     loadBudgets();
   };
 
   const handleBudgetDelete = async (id: string) => {
-    await api.delete(`/ppm/budgets/${id}`);
+    setBudgetListError(null);
+    try {
+      await api.delete(`/ppm/budgets/${id}`);
+    } catch (err) {
+      setBudgetListError(errorText(err));
+      return;
+    }
     loadBudgets();
   };
 
@@ -161,6 +181,7 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
         date: todayIsoDate(),
       });
     }
+    setCostSaveError(null);
     setCostDialog({ open: true, item });
   };
 
@@ -171,22 +192,40 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
       actual: costForm.actual,
       date: costForm.date || null,
     };
-    if (costDialog.item) {
-      await api.patch(`/ppm/costs/${costDialog.item.id}`, payload);
-    } else {
-      await api.post(`/ppm/initiatives/${initiativeId}/costs`, payload);
+    try {
+      if (costDialog.item) {
+        await api.patch(`/ppm/costs/${costDialog.item.id}`, payload);
+      } else {
+        await api.post(`/ppm/initiatives/${initiativeId}/costs`, payload);
+      }
+    } catch (err) {
+      setCostSaveError(errorText(err));
+      return;
     }
     setCostDialog({ open: false });
     onRefresh();
   };
 
   const handleCostDelete = async (id: string) => {
-    await api.delete(`/ppm/costs/${id}`);
+    setCostListError(null);
+    try {
+      await api.delete(`/ppm/costs/${id}`);
+    } catch (err) {
+      setCostListError(errorText(err));
+      return;
+    }
     onRefresh();
   };
 
   return (
     <Box>
+      {/* The totals below need the budget lines: say so when they failed to load. */}
+      {budgetLoadError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {errorText(budgetLoadError)}
+        </Alert>
+      )}
+
       {/* Summary Bar */}
       <Paper
         sx={{
@@ -267,6 +306,12 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
         </Button>
       </Box>
 
+      {budgetListError && (
+        <Alert severity="error" sx={{ mb: 1 }} onClose={() => setBudgetListError(null)}>
+          {budgetListError}
+        </Alert>
+      )}
+
       <TableContainer
         component={Paper}
         variant="outlined"
@@ -299,11 +344,16 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
                 <TableCell align="right">{fmt.format(bl.amount)}</TableCell>
                 <TableCell>
                   <Box display="flex" gap={0.5}>
-                    <IconButton size="small" onClick={() => handleBudgetOpen(bl)}>
+                    <IconButton
+                      size="small"
+                      aria-label={t("common:actions.edit")}
+                      onClick={() => handleBudgetOpen(bl)}
+                    >
                       <MaterialSymbol icon="edit" size={16} />
                     </IconButton>
                     <IconButton
                       size="small"
+                      aria-label={t("common:actions.delete")}
                       onClick={() => handleBudgetDelete(bl.id)}
                     >
                       <MaterialSymbol icon="delete" size={16} />
@@ -312,7 +362,7 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
                 </TableCell>
               </TableRow>
             ))}
-            {budgetLines.length === 0 && (
+            {budgetLines.length === 0 && !budgetLoadError && (
               <TableRow>
                 <TableCell colSpan={4} align="center" sx={{ py: 2 }}>
                   <Typography variant="body2" color="text.secondary">
@@ -342,6 +392,12 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
         </Button>
       </Box>
 
+      {costListError && (
+        <Alert severity="error" sx={{ mb: 1 }} onClose={() => setCostListError(null)}>
+          {costListError}
+        </Alert>
+      )}
+
       <TableContainer
         component={Paper}
         variant="outlined"
@@ -350,7 +406,7 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
         <Table size="small" sx={{ minWidth: { xs: 660, md: "auto" } }}>
           <TableHead>
             <TableRow>
-              <TableCell>{t("common:description", "Description")}</TableCell>
+              <TableCell>{t("common:labels.description")}</TableCell>
               <TableCell>{t("category")}</TableCell>
               <TableCell>{t("date")}</TableCell>
               <TableCell align="right">{t("amount")}</TableCell>
@@ -378,11 +434,16 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
                 <TableCell align="right">{fmt.format(cl.actual)}</TableCell>
                 <TableCell>
                   <Box display="flex" gap={0.5}>
-                    <IconButton size="small" onClick={() => handleCostOpen(cl)}>
+                    <IconButton
+                      size="small"
+                      aria-label={t("common:actions.edit")}
+                      onClick={() => handleCostOpen(cl)}
+                    >
                       <MaterialSymbol icon="edit" size={16} />
                     </IconButton>
                     <IconButton
                       size="small"
+                      aria-label={t("common:actions.delete")}
                       onClick={() => handleCostDelete(cl.id)}
                     >
                       <MaterialSymbol icon="delete" size={16} />
@@ -417,6 +478,11 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
             {budgetDialog.item ? t("editBudgetLine") : t("addBudgetLine")}
           </DialogTitle>
           <DialogContent>
+            {budgetSaveError && (
+              <Alert severity="error" sx={{ mb: 1 }}>
+                {budgetSaveError}
+              </Alert>
+            )}
             <Box display="flex" flexDirection="column" gap={2} mt={1}>
               <TextField
                 label={t("fiscalYear")}
@@ -431,8 +497,9 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
                 size="small"
               />
               <FormControl size="small">
-                <InputLabel>{t("category")}</InputLabel>
+                <InputLabel id="ppm-budget-category-label">{t("category")}</InputLabel>
                 <Select
+                  labelId="ppm-budget-category-label"
                   value={budgetForm.category}
                   label={t("category")}
                   onChange={(e) =>
@@ -484,9 +551,14 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
             {costDialog.item ? t("editCostLine") : t("addCostItem")}
           </DialogTitle>
           <DialogContent>
+            {costSaveError && (
+              <Alert severity="error" sx={{ mb: 1 }}>
+                {costSaveError}
+              </Alert>
+            )}
             <Box display="flex" flexDirection="column" gap={2} mt={1}>
               <TextField
-                label={t("common:description", "Description")}
+                label={t("common:labels.description")}
                 value={costForm.description}
                 onChange={(e) =>
                   setCostForm({ ...costForm, description: e.target.value })
@@ -495,8 +567,9 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
                 size="small"
               />
               <FormControl size="small">
-                <InputLabel>{t("category")}</InputLabel>
+                <InputLabel id="ppm-cost-category-label">{t("category")}</InputLabel>
                 <Select
+                  labelId="ppm-cost-category-label"
                   value={costForm.category}
                   label={t("category")}
                   onChange={(e) =>
