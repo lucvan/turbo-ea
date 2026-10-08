@@ -69,12 +69,28 @@ describe("TodosTab", () => {
     expect(await screen.findByText("No todos yet.")).toBeInTheDocument();
   });
 
-  it("keeps the empty state when the list cannot be loaded", async () => {
+  it("shows the error, not the empty state, when the list cannot be loaded", async () => {
     mockApi.fail("get", LIST, 500, "boom");
     render(<TodosTab fsId={FS_ID} />);
-    await waitFor(() => expect(mockApi.callsOf("get", LIST)).toHaveLength(1));
-    expect(await screen.findByText("No todos yet.")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(`GET ${LIST} failed`);
+    expect(screen.queryByText("No todos yet.")).not.toBeInTheDocument();
     expect(screen.queryAllByRole("listitem")).toHaveLength(0);
+  });
+
+  it("names a failed load that carries no message, and clears it once a reload succeeds", async () => {
+    mockApi.on("get", LIST, () => Promise.reject("boom"));
+    const user = userEvent.setup();
+    render(<TodosTab fsId={FS_ID} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong");
+
+    // Adding a todo reloads the list; this time it loads.
+    mockApi.on("get", LIST, []);
+    await user.click(screen.getByRole("button", { name: /Add Todo/ }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Description"), "First one");
+    await user.click(within(dialog).getByRole("button", { name: "Add" }));
+    expect(await screen.findByText("No todos yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("re-reads the list when the card changes", async () => {
@@ -142,11 +158,21 @@ describe("TodosTab", () => {
     mockApi.on("get", LIST, [
       ...TODOS,
       { id: "t6", description: "Unnamed tracker", status: "open", external_ref: "SN-7", external_url: "https://sn.example/7" },
+      { id: "t7", description: "Bare mirror", status: "open", external_url: "https://bare.example/1" },
+      { id: "t8", description: "Source only", status: "open", external_source: "ServiceNow", external_url: "https://sn.example/8" },
     ]);
     render(<TodosTab fsId={FS_ID} />);
     expect(await screen.findByRole("button", { name: /JIRA-42/ })).toHaveAttribute("title", "Open in Jira");
     // No tracker name: a plain "open in new tab", never "Open in " with nothing after it.
     expect(screen.getByRole("button", { name: /SN-7/ })).toHaveAttribute("title", "Open in new tab");
+    // Neither a reference nor a tracker: the chip still says what it does.
+    const bare = within(rowOf("Bare mirror")).getByText("open_in_new").closest(".MuiChip-root") as HTMLElement;
+    expect(bare).toHaveTextContent(/^open_in_newOpen in new tab$/);
+    // No reference: the tracker's name.
+    expect(within(rowOf("Source only")).getByRole("button", { name: /ServiceNow/ })).toHaveAttribute(
+      "title",
+      "Open in ServiceNow",
+    );
   });
 
   it("flips an open todo to done, and a done one back to open", async () => {
@@ -180,8 +206,8 @@ describe("TodosTab", () => {
     const user = userEvent.setup();
     render(<TodosTab fsId={FS_ID} />);
     await screen.findByText("Archive the old instance");
-    const buttons = within(rowOf("Archive the old instance")).getAllByRole("button");
-    await user.click(buttons[buttons.length - 1]);
+    // The icon-only button is named for what it does.
+    await user.click(within(rowOf("Archive the old instance")).getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(mockApi.callsOf("delete", "/todos/t2")).toHaveLength(1));
     await waitFor(() => expect(mockApi.callsOf("get", LIST)).toHaveLength(2));
   });

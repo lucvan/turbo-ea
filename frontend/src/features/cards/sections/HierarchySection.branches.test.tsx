@@ -39,7 +39,7 @@ vi.mock("@/components/CardPicker", () => ({
 import { mockApi } from "@/test/apiMock";
 import { hookState, withMetamodel } from "@/test/hooks";
 import { makeCardType } from "@/test/fixtures/metamodel";
-import { renderWithProviders, userWith } from "@/test/render";
+import { renderWithProviders, userWith, wrapWithProviders } from "@/test/render";
 import { HierarchySection } from "./index";
 import type { Card, HierarchyData } from "@/types";
 
@@ -116,11 +116,22 @@ describe("HierarchySection — rendering", () => {
     expect(screen.getByText("Company B1")).toBeInTheDocument();
   });
 
-  it("keeps the progress bar while the hierarchy fails to load", async () => {
+  it("stops the progress bar and shows the error when the hierarchy fails to load", async () => {
     mockApi.fail("get", "/cards/b/hierarchy", 500);
     renderSection();
-    await waitFor(() => expect(mockApi.callsOf("get", "/cards/b/hierarchy")).toHaveLength(1));
-    expect(screen.getByRole("progressbar")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("GET /cards/b/hierarchy failed");
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
+  it("names a failed load that carries no message, and drops it once another card loads", async () => {
+    mockApi.on("get", "/cards/b/hierarchy", () => Promise.reject("nope"));
+    mockApi.on("get", "/cards/c/hierarchy", ORPHAN);
+    const { rerender } = renderWithProviders(<HierarchySection card={CARD} onUpdate={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong");
+
+    rerender(wrapWithProviders(<HierarchySection card={{ ...CARD, id: "c" }} onUpdate={vi.fn()} />));
+    expect(await screen.findByText("No parent")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("shows the empty states and no edit controls for a read-only viewer", async () => {

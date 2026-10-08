@@ -142,6 +142,9 @@ export default function CreateCardDialog({
   const [eolSuggestions, setEolSuggestions] = useState<EolProductMatch[]>([]);
   const [eolSearching, setEolSearching] = useState(false);
   const [eolAutoSearchDone, setEolAutoSearchDone] = useState(false);
+  // The (trimmed) name the finished search was for — its verdict says
+  // nothing about a name typed since.
+  const [eolSearchedName, setEolSearchedName] = useState("");
 
   // AI suggestion state
   const { aiStatus } = useAiStatus();
@@ -151,6 +154,8 @@ export default function CreateCardDialog({
 
   // Tag picker state
   const [tagGroups, setTagGroups] = useState<TagGroup[]>([]);
+  // Why the last load failed ("" when it was not an Error); null when it did not.
+  const [tagGroupsError, setTagGroupsError] = useState<string | null>(null);
   const [tagIds, setTagIds] = useState<string[]>([]);
 
   // Provider linkage staged in VendorField — `fsId` doesn't exist yet during
@@ -203,13 +208,15 @@ export default function CreateCardDialog({
     return fields;
   }, [typeConfig, hiddenFieldKeys]);
 
-  // Fetch tag groups when the dialog opens
+  // Fetch tag groups when the dialog opens. A failed reload keeps the groups
+  // already held and says so, rather than silently dropping the picker.
   useEffect(() => {
     if (!open) return;
+    setTagGroupsError(null);
     api
       .get<TagGroup[]>("/tag-groups")
       .then(setTagGroups)
-      .catch(() => setTagGroups([]));
+      .catch((err: unknown) => setTagGroupsError(err instanceof Error ? err.message : ""));
   }, [open]);
 
   // Reset dependent fields when type changes. The initial presets survive
@@ -238,17 +245,24 @@ export default function CreateCardDialog({
     }
   }, [open, initialType]);
 
-  // Reset form when dialog closes — back to the presets, so reopening with
-  // the same initial type starts pre-seeded again.
-  useEffect(() => {
-    if (!open) {
+  // Reset the form as the dialog opens — back to the presets, so reopening
+  // with the same initial type starts pre-seeded again. Not as it closes:
+  // that blanked the form while it was still fading out. Done while rendering
+  // (state adjusted on a prop change) rather than in an effect, so neither the
+  // first frame nor any effect sees the previous session; and only on the
+  // open transition, so a new initial type while open does not wipe what was
+  // typed (the effect above follows it).
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
       setSelectedType(initialType || "");
       setSubtype(initialType ? initialSubtype || "" : "");
       setParentCard(null);
       setName("");
       setNameConflict(null);
       setDescription("");
-      setAttributes(initialType ? { ...(initialAttributesRef.current || {}) } : {});
+      setAttributes(initialType ? { ...(initialAttributes || {}) } : {});
       setLoading(false);
       setError("");
       setEolProduct("");
@@ -262,14 +276,23 @@ export default function CreateCardDialog({
       setTagIds([]);
       setPendingProvider(null);
     }
-  }, [open, initialType, initialSubtype]);
+  }
 
   // Auto-search EOL when name changes (debounced). Cancelling the timer never
   // cancelled a dispatched request, so suggestions for a half-typed name could
   // land last and replace the ones for the finished name (#882).
   const [debouncedName] = useDebouncedValue(name, 600);
+  // Keyed on whether a product AND cycle are linked, not on the product: a
+  // picked suggestion sets the product alone, and must not search again.
+  const eolLinked = Boolean(eolProduct && eolCycle);
+  // The live name, read by the search without re-running it per keystroke.
+  const nameRef = useRef(name);
+  nameRef.current = name;
   useAbortableEffect(
     async ({ signal, isCurrent }) => {
+      // Closed: nothing to search for — and re-running here supersedes a
+      // search still in flight, so its answer cannot land in the next session.
+      if (!open) return;
       const trimmed = debouncedName.trim();
       if (!isEolEligible || !trimmed || trimmed.length < 2) {
         setEolSuggestions([]);
@@ -278,7 +301,13 @@ export default function CreateCardDialog({
         return;
       }
       // Don't auto-search if already linked
-      if (eolProduct && eolCycle) return;
+      if (eolLinked) return;
+      // The name has moved on since it settled (the form was just reset on
+      // open): don't search the old one — the debounce brings the new one.
+      if (debouncedName !== nameRef.current) {
+        setEolSearching(false);
+        return;
+      }
 
       setEolSearching(true);
       try {
@@ -288,16 +317,18 @@ export default function CreateCardDialog({
         );
         if (!isCurrent()) return;
         setEolSuggestions(results);
+        setEolSearchedName(trimmed);
         setEolAutoSearchDone(true);
       } catch {
         if (!isCurrent()) return;
         setEolSuggestions([]);
+        setEolSearchedName(trimmed);
         setEolAutoSearchDone(true);
       } finally {
         if (isCurrent()) setEolSearching(false);
       }
     },
-    [debouncedName, isEolEligible, eolProduct, eolCycle],
+    [debouncedName, isEolEligible, eolLinked, open],
   );
 
   const setAttr = (key: string, value: unknown) => {
@@ -771,6 +802,13 @@ export default function CreateCardDialog({
         />
 
         {/* Tags */}
+        {selectedType && tagGroupsError !== null && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {t("create.tagsLoadFailed", {
+              error: tagGroupsError || t("common:errors.generic"),
+            })}
+          </Alert>
+        )}
         {selectedType && tagGroups.length > 0 && (
           <Box sx={{ mb: 2 }}>
             <TagPicker
@@ -785,7 +823,9 @@ export default function CreateCardDialog({
         {/* AI Suggest button */}
         {aiEnabled && name.trim().length >= 2 && !aiResponse && !aiLoading && (
           <Box sx={{ mb: 2, display: "flex", justifyContent: "flex-start" }}>
-            <Tooltip title={t("common:ai.buttonTooltip")}>
+            {/* describeChild: the tooltip describes the button, and the
+                visible label stays its accessible name (WCAG 2.5.3). */}
+            <Tooltip title={t("common:ai.buttonTooltip")} describeChild>
               <Button
                 size="small"
                 variant="outlined"
@@ -932,7 +972,7 @@ export default function CreateCardDialog({
                 )}
 
                 {/* No matches found */}
-                {!eolSearching && eolAutoSearchDone && eolSuggestions.length === 0 && name.trim().length >= 2 && (
+                {!eolSearching && eolAutoSearchDone && eolSuggestions.length === 0 && eolSearchedName === name.trim() && (
                   <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
                     {t("eol.noMatches")}
                   </Typography>

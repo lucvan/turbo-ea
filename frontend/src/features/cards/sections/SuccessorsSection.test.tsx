@@ -175,14 +175,33 @@ describe("SuccessorsSection", () => {
     expect(within(screen.getByText("CRM Cloud").closest("li")!).getByText("category")).toBeInTheDocument();
   });
 
-  it("ends the progress bar when the load fails, and excludes only this card", async () => {
+  it("ends the progress bar and shows the error, not the empty hints, when the load fails", async () => {
     mockApi.fail("get", RELATIONS_URL, 500, "boom");
-    const { user } = renderSection();
-    expect(await screen.findByText("No predecessors.")).toBeInTheDocument();
+    renderSection();
+    expect(await screen.findByRole("alert")).toHaveTextContent(`GET ${RELATIONS_URL} failed`);
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /Add Successor/ }));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByTestId("picker-excludes")).toHaveTextContent(new RegExp(`^${CARD.id}$`));
+    // An unknown lineage is not an empty one.
+    expect(screen.queryByText("No predecessors.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No successors.")).not.toBeInTheDocument();
+  });
+
+  it("names a failed load that carries no message", async () => {
+    mockApi.on("get", RELATIONS_URL, () => Promise.reject("boom"));
+    renderSection();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong");
+    expect(screen.queryByText("No predecessors.")).not.toBeInTheDocument();
+  });
+
+  it("drops a load error once the next card's lineage loads", async () => {
+    const other = cardById(CARD_IDS.crm);
+    const otherUrl = `/relations?card_id=${other.id}&type=${SUCCESSOR_RT.key}`;
+    mockApi.fail("get", RELATIONS_URL, 500, "boom");
+    mockApi.on("get", otherUrl, []);
+    const { rerender } = renderWithProviders(<SuccessorsSection card={CARD} />);
+    await screen.findByRole("alert");
+    rerender(wrapWithProviders(<SuccessorsSection card={other} />));
+    expect(await screen.findByText("No predecessors.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("re-reads the lineage when the card changes", async () => {

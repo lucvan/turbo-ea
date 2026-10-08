@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo } from "react";
 import type { KeyboardEvent } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router";
 import Box from "@mui/material/Box";
@@ -121,10 +121,20 @@ export default function CardDetail() {
   const titleDirty =
     editingName &&
     (nameDraft !== (card?.name ?? "") || aliasDraft !== (card?.alias ?? ""));
+  // Once the card is deleted its unsaved edits have nowhere to go, so the
+  // page leaves without asking — declining the prompt used to strand the user
+  // on the page of a card that no longer exists.
+  const [deleted, setDeleted] = useState(false);
   useUnsavedChangesGuard(
-    sectionsDirty || titleDirty,
+    !deleted && (sectionsDirty || titleDirty),
     t("cards:detail.unsavedLeaveConfirm"),
   );
+  // A layout effect, so the navigation lands before the guard's own passive
+  // cleanup runs: that cleanup steps back over its history sentinel while the
+  // URL is still this card's, which would race the push.
+  useLayoutEffect(() => {
+    if (deleted) navigate("/inventory");
+  }, [deleted]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Inline subtype editing
   const [subtypeAnchor, setSubtypeAnchor] = useState<HTMLElement | null>(null);
@@ -139,6 +149,9 @@ export default function CardDetail() {
   const [aiResponse, setAiResponse] = useState<AiSuggestResponse | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
+  // Any other failed approve / reject / reset — the badge fires the action and
+  // forgets it, so a failure nobody catches here would be shown to no one.
+  const [approvalError, setApprovalError] = useState("");
   const [approvalBlock, setApprovalBlock] = useState<{
     missing_relations: { key: string; label: string; side: "source" | "target"; other_type_key: string }[];
     missing_tag_groups: { id: string; name: string }[];
@@ -181,6 +194,7 @@ export default function CardDetail() {
 
   useEffect(() => {
     if (!id) return;
+    setApprovalError("");
     // Read tab from URL search params (e.g. ?tab=1&subtab=1)
     const urlTab = searchParams.get("tab");
     const urlSubTab = searchParams.get("subtab");
@@ -295,6 +309,7 @@ export default function CardDetail() {
             : "DRAFT";
       setCard({ ...card, approval_status: newStatus });
       setApprovalBlock(null);
+      setApprovalError("");
     } catch (err) {
       if (
         err instanceof ApiError &&
@@ -311,9 +326,10 @@ export default function CardDetail() {
           missing_relations: detail.missing_relations,
           missing_tag_groups: detail.missing_tag_groups,
         });
+        setApprovalError("");
         return;
       }
-      throw err;
+      setApprovalError(err instanceof Error ? err.message : t("common:errors.generic"));
     }
   };
 
@@ -411,7 +427,7 @@ export default function CardDetail() {
 
   const handleDeleteConfirmed = () => {
     setDeleteDialogOpen(false);
-    navigate("/inventory");
+    setDeleted(true);
   };
 
   // ── AI suggestions ──────────────────────────────────────────
@@ -893,6 +909,13 @@ export default function CardDetail() {
                 {t("detail.archivedBanner")}
                 {daysUntilPurge !== null && ` ${t("detail.purgeWarning", { count: daysUntilPurge })}`}
                 {archiveRetentionDays === 0 && ` ${t("detail.archivedIndefinite")}`}
+              </Alert>
+            )}
+
+            {/* Approval transition failed for any other reason */}
+            {approvalError && (
+              <Alert severity="error" sx={{ mb: 2 }} onClose={() => setApprovalError("")}>
+                {approvalError}
               </Alert>
             )}
 

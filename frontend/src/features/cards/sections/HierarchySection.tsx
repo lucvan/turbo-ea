@@ -226,10 +226,20 @@ function HierarchySection({
   const [createName, setCreateName] = useState("");
   const [createLoading, setCreateLoading] = useState(false);
   const [hierarchyError, setHierarchyError] = useState("");
+  // A failed load: shown instead of a progress bar that would never end.
+  const [loadError, setLoadError] = useState("");
 
   const loadHierarchy = useCallback(() => {
-    api.get<HierarchyData>(`/cards/${card.id}/hierarchy`).then(setHierarchy).catch(() => {});
-  }, [card.id]);
+    api
+      .get<HierarchyData>(`/cards/${card.id}/hierarchy`)
+      .then((h) => {
+        setHierarchy(h);
+        setLoadError("");
+      })
+      .catch((err: unknown) =>
+        setLoadError(err instanceof Error ? err.message : t("common:errors.generic")),
+      );
+  }, [card.id, t]);
 
   useEffect(loadHierarchy, [loadHierarchy]);
 
@@ -362,8 +372,13 @@ function HierarchySection({
             {hierarchyError}
           </Alert>
         )}
+        {loadError && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {loadError}
+          </Alert>
+        )}
         {!hierarchy ? (
-          <LinearProgress />
+          !loadError && <LinearProgress />
         ) : (
           <Box>
             {/* Ancestor breadcrumb trail */}

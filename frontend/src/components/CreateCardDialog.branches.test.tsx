@@ -183,10 +183,8 @@ beforeEach(() => {
 });
 
 
-// The AI button is found by its visible label. Its accessible name currently
-// comes from the tooltip ("Use AI to suggest…"), a label-in-name mismatch
-// (WCAG 2.5.3) that a role+name query would pin.
-const aiButton = () => screen.queryByText("Suggest with AI")?.closest("button") ?? null;
+// Named by its visible label (WCAG 2.5.3); the tooltip only describes it.
+const aiButton = () => screen.queryByRole("button", { name: /Suggest with AI/ });
 
 describe("CreateCardDialog — required fields of every type", () => {
   it("renders each field type, and submits what was entered", async () => {
@@ -308,11 +306,16 @@ describe("CreateCardDialog — errors and closing", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("keeps the dialog usable when tag groups cannot be loaded", async () => {
+  it("keeps the dialog usable when tag groups cannot be loaded, and says so", async () => {
     mockApi.fail("get", "/tag-groups", 500);
-    renderDialog({ initialType: "Application" });
-    await waitFor(() => expect(mockApi.callsOf("get", "/tag-groups")).toHaveLength(1));
+    const { user } = renderDialog({ initialType: "Application" });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Tags could not be loaded: GET /tag-groups failed",
+    );
     expect(screen.queryByText("pick-tags")).not.toBeInTheDocument();
+    await user.type(nameBox(), "Still works");
+    await user.click(screen.getByRole("button", { name: /^create$/i }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalled());
   });
 
   it("lets a modified click on the duplicate link through without closing", async () => {

@@ -43,6 +43,8 @@ function TodosTab({ fsId }: { fsId: string }) {
   // A failed add is shown in its dialog; a failed list action above the list.
   const [addError, setAddError] = useState("");
   const [error, setError] = useState("");
+  // A failed list load: shown instead of the empty state, which would be a lie.
+  const [loadError, setLoadError] = useState("");
 
   // Recurrence state for the Add dialog.
   const [recurring, setRecurring] = useState(false);
@@ -54,9 +56,14 @@ function TodosTab({ fsId }: { fsId: string }) {
   const load = useCallback(() => {
     api
       .get<Todo[]>(`/cards/${fsId}/todos`)
-      .then(setTodos)
-      .catch(() => {});
-  }, [fsId]);
+      .then((rows) => {
+        setTodos(rows);
+        setLoadError("");
+      })
+      .catch((err: unknown) =>
+        setLoadError(err instanceof Error ? err.message : t("common:errors.generic")),
+      );
+  }, [fsId, t]);
   useEffect(load, [load]);
 
   useEffect(() => {
@@ -160,6 +167,11 @@ function TodosTab({ fsId }: { fsId: string }) {
           {t("todos.add")}
         </Button>
       </Box>
+      {loadError && (
+        <Alert severity="error" sx={{ mb: 1 }}>
+          {loadError}
+        </Alert>
+      )}
       {error && (
         <Alert severity="error" onClose={() => setError("")} sx={{ mb: 1 }}>
           {error}
@@ -172,7 +184,11 @@ function TodosTab({ fsId }: { fsId: string }) {
             <ListItem
               key={td.id}
               secondaryAction={
-                <IconButton size="small" onClick={() => handleDelete(td.id)}>
+                <IconButton
+                  size="small"
+                  onClick={() => handleDelete(td.id)}
+                  aria-label={t("common:actions.delete")}
+                >
                   <MaterialSymbol icon="close" size={16} />
                 </IconButton>
               }
@@ -244,7 +260,11 @@ function TodosTab({ fsId }: { fsId: string }) {
                     {td.external_url && (
                       <Chip
                         size="small"
-                        label={td.external_ref ?? td.external_source}
+                        label={
+                          td.external_ref ||
+                          td.external_source ||
+                          t("common:actions.openInNewTab")
+                        }
                         title={
                           td.external_source
                             ? t("common:todos.openExternal", { source: td.external_source })
@@ -269,7 +289,7 @@ function TodosTab({ fsId }: { fsId: string }) {
             </ListItem>
           );
         })}
-        {todos.length === 0 && (
+        {todos.length === 0 && !loadError && (
           <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
             {t("todos.empty")}
           </Typography>

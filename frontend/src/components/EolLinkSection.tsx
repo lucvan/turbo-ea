@@ -24,7 +24,7 @@ import LinearProgress from "@mui/material/LinearProgress";
 import MaterialSymbol from "@/components/MaterialSymbol";
 import { useSyncedExpanded } from "@/hooks/useSyncedExpanded";
 import { api } from "@/api/client";
-import { useAbortableEffect } from "@/hooks/useLatestRequest";
+import { useAbortableEffect, useLatestRequest } from "@/hooks/useLatestRequest";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { STATUS_COLORS } from "@/theme/tokens";
 import { toLocalDate } from "@/lib/dates";
@@ -529,6 +529,8 @@ export default function EolLinkSection({ card, onSave, initialExpanded }: EolLin
   const [cycleData, setCycleData] = useState<EolCycle | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // A failed link/unlink save — an error, unlike the fetch warning above.
+  const [saveError, setSaveError] = useState("");
   const [linking, setLinking] = useState(false);
   const [pickerResetKey, setPickerResetKey] = useState(0);
   // No explicit setting from the metamodel → expand only when a product is
@@ -536,27 +538,41 @@ export default function EolLinkSection({ card, onSave, initialExpanded }: EolLin
   // accordion is controlled rather than relying on `defaultExpanded`.
   const [expanded, setExpanded] = useSyncedExpanded(initialExpanded ?? isLinked);
 
-  // Fetch cycle data when linked
-  const fetchCycleData = useCallback(async () => {
-    if (!eolProduct || !eolCycle) {
-      setCycleData(null);
-      return;
-    }
-    setLoading(true);
-    setError("");
-    try {
-      const cycles = await api.get<EolCycle[]>(
-        `/eol/products/${encodeURIComponent(eolProduct)}`
-      );
-      const match = cycles.find((c) => String(c.cycle) === String(eolCycle));
-      setCycleData(match || null);
-      if (!match) setError(`Cycle "${eolCycle}" not found for ${eolProduct}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to fetch EOL data");
-    } finally {
-      setLoading(false);
-    }
-  }, [eolProduct, eolCycle]);
+  // Fetch cycle data when linked. Effect-driven AND called by Refresh, so it
+  // runs through `useLatestRequest`: a reply for the product the card was
+  // linked to before can never overwrite the current one's.
+  const { run } = useLatestRequest();
+  const fetchCycleData = useCallback(
+    () =>
+      run(async ({ signal, isCurrent }) => {
+        if (!eolProduct || !eolCycle) {
+          setCycleData(null);
+          setLoading(false);
+          return;
+        }
+        setLoading(true);
+        setError("");
+        try {
+          const cycles = await api.get<EolCycle[]>(
+            `/eol/products/${encodeURIComponent(eolProduct)}`,
+            { signal },
+          );
+          if (!isCurrent()) return;
+          const match = cycles.find((c) => String(c.cycle) === String(eolCycle));
+          setCycleData(match || null);
+          if (!match)
+            setError(
+              t("eol.errors.cycleNotFound", { cycle: eolCycle, product: eolProduct }),
+            );
+        } catch (e) {
+          if (!isCurrent()) return;
+          setError(e instanceof Error ? e.message : t("eol.errors.fetchFailed"));
+        } finally {
+          if (isCurrent()) setLoading(false);
+        }
+      }),
+    [run, eolProduct, eolCycle, t],
+  );
 
   useEffect(() => {
     // A different product/cycle: the previous one's details must not sit under
@@ -579,16 +595,26 @@ export default function EolLinkSection({ card, onSave, initialExpanded }: EolLin
       },
     };
 
-    await onSave(updates);
-    setLinking(false);
+    setSaveError("");
+    try {
+      await onSave(updates);
+      setLinking(false);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : t("common:errors.generic"));
+    }
   };
 
   const handleUnlink = async () => {
     const newAttrs = { ...(card.attributes || {}) };
     delete newAttrs.eol_product;
     delete newAttrs.eol_cycle;
-    await onSave({ attributes: newAttrs });
-    setCycleData(null);
+    setSaveError("");
+    try {
+      await onSave({ attributes: newAttrs });
+      setCycleData(null);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : t("common:errors.generic"));
+    }
   };
 
   return (
@@ -615,6 +641,11 @@ export default function EolLinkSection({ card, onSave, initialExpanded }: EolLin
         </Box>
       </AccordionSummary>
       <AccordionDetails>
+        {saveError && (
+          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setSaveError("")}>
+            {saveError}
+          </Alert>
+        )}
         {error && (
           <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setError("")}>
             {error}
@@ -695,6 +726,7 @@ export default function EolLinkSection({ card, onSave, initialExpanded }: EolLin
               onSelect={handleLink}
               onCancel={() => {
                 setLinking(false);
+                setSaveError("");
                 setPickerResetKey((k) => k + 1);
               }}
               initialProduct={eolProduct}
