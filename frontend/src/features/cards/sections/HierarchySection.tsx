@@ -33,6 +33,7 @@ import { hasTypePermission } from "@/components/RequirePermission";
 import { useAuthContext } from "@/hooks/AuthContext";
 import { useOptionLabel, useTypeLabel } from "@/hooks/useResolveLabel";
 import { useSyncedExpanded } from "@/hooks/useSyncedExpanded";
+import { useLatestRequest } from "@/hooks/useLatestRequest";
 import { api } from "@/api/client";
 import type { Card, FieldOption, HierarchyData } from "@/types";
 
@@ -229,17 +230,23 @@ function HierarchySection({
   // A failed load: shown instead of a progress bar that would never end.
   const [loadError, setLoadError] = useState("");
 
+  // Keyed on the card and also called after every write: only the newest
+  // load may write the tree, so a late reply for the card shown before cannot
+  // replace this card's hierarchy (#882).
+  const hierarchyRequest = useLatestRequest();
   const loadHierarchy = useCallback(() => {
-    api
-      .get<HierarchyData>(`/cards/${card.id}/hierarchy`)
-      .then((h) => {
+    void hierarchyRequest.run(async ({ signal, isCurrent }) => {
+      try {
+        const h = await api.get<HierarchyData>(`/cards/${card.id}/hierarchy`, { signal });
+        if (!isCurrent()) return;
         setHierarchy(h);
         setLoadError("");
-      })
-      .catch((err: unknown) =>
-        setLoadError(err instanceof Error ? err.message : t("common:errors.generic")),
-      );
-  }, [card.id, t]);
+      } catch (err: unknown) {
+        if (!isCurrent()) return;
+        setLoadError(err instanceof Error ? err.message : t("common:errors.generic"));
+      }
+    });
+  }, [hierarchyRequest, card.id, t]);
 
   useEffect(loadHierarchy, [loadHierarchy]);
 

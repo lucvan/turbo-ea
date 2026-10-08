@@ -206,6 +206,7 @@
   "todos.assignTo": "Назначить",
   "todos.dueDate": "Срок",
   "todos.adding": "Добавление…",
+  "todos.usersLoadFailed": "Не удалось загрузить список исполнителей: {{error}}",
   "history.empty": "Истории пока нет.",
   "history.by": "от {{user}}",
   "history.events.created": "Создано",

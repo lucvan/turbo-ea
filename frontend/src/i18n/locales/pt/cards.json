@@ -206,6 +206,7 @@
   "todos.assignTo": "Atribuir a",
   "todos.dueDate": "Prazo",
   "todos.adding": "Adicionando…",
+  "todos.usersLoadFailed": "Não foi possível carregar os responsáveis: {{error}}",
   "history.empty": "Nenhum histórico ainda.",
   "history.by": "por {{user}}",
   "history.events.created": "Criado",

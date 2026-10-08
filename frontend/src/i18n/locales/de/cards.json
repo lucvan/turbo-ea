@@ -206,6 +206,7 @@
   "todos.assignTo": "Zuweisen an",
   "todos.dueDate": "Fälligkeitsdatum",
   "todos.adding": "Wird hinzugefügt…",
+  "todos.usersLoadFailed": "Zuständige konnten nicht geladen werden: {{error}}",
   "history.empty": "Noch keine Historie.",
   "history.by": "von {{user}}",
   "history.events.created": "Erstellt",

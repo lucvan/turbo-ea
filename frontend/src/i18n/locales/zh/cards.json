@@ -206,6 +206,7 @@
   "todos.assignTo": "指派给",
   "todos.dueDate": "截止日期",
   "todos.adding": "正在添加…",
+  "todos.usersLoadFailed": "无法加载可指派的人员：{{error}}",
   "history.empty": "暂无历史记录。",
   "history.by": "由 {{user}}",
   "history.events.created": "已创建",

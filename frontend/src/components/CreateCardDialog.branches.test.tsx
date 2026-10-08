@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { useLocation } from "react-router";
 
 vi.mock("@/api/client", () => import("@/test/apiMock").then((m) => m.apiClientModule()));
@@ -138,7 +139,8 @@ const REL_PROVIDER_TO_APP = makeRelationType({
 });
 
 const onClose = vi.fn();
-const onCreate = vi.fn(async () => "new-id");
+// Typed with the prop it stands in for, so `mock.calls[0][0]` is the create payload.
+const onCreate = vi.fn<ComponentProps<typeof CreateCardDialog>["onCreate"]>(async () => "new-id");
 
 function LocationProbe() {
   return <div data-testid="location">{useLocation().pathname}</div>;
@@ -436,13 +438,25 @@ describe("CreateCardDialog — end-of-life tracking", () => {
     expect(screen.getByRole("button", { name: "Manual Search" })).toBeInTheDocument();
   });
 
-  it("says so when the search finds nothing or fails", async () => {
-    mockApi.fail("get", /^\/eol\/products\/fuzzy/, 502);
+  it("says so when the search finds nothing", async () => {
     const { user } = renderDialog({ initialType: "ITComponent" });
     await user.type(nameBox(), "Obscure thing");
     expect(
       await screen.findByText(/No EOL matches found/, {}, { timeout: 3000 }),
     ).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("says the search failed, rather than that it found nothing, when it fails", async () => {
+    mockApi.fail("get", /^\/eol\/products\/fuzzy/, 502);
+    const { user } = renderDialog({ initialType: "ITComponent" });
+    await user.type(nameBox(), "Obscure thing");
+    expect(await screen.findByRole("alert", {}, { timeout: 3000 })).toHaveTextContent(
+      "GET /eol/products/fuzzy?search=Obscure%20thing&limit=5 failed",
+    );
+    expect(screen.queryByText(/No EOL matches found/)).not.toBeInTheDocument();
+    // Manual search stays available.
+    expect(screen.getByRole("button", { name: "Manual Search" })).toBeEnabled();
   });
 });
 

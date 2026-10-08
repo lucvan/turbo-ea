@@ -206,6 +206,7 @@
   "todos.assignTo": "Assign to",
   "todos.dueDate": "Due date",
   "todos.adding": "Adding…",
+  "todos.usersLoadFailed": "Assignees could not be loaded: {{error}}",
   "history.empty": "No history yet.",
   "history.by": "by {{user}}",
   "history.events.created": "Created",

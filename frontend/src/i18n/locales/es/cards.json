@@ -206,6 +206,7 @@
   "todos.assignTo": "Asignar a",
   "todos.dueDate": "Fecha de vencimiento",
   "todos.adding": "Agregando…",
+  "todos.usersLoadFailed": "No se pudieron cargar las personas asignables: {{error}}",
   "history.empty": "Aún no hay historial.",
   "history.by": "por {{user}}",
   "history.events.created": "Creado",

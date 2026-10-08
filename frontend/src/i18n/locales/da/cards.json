@@ -206,6 +206,7 @@
   "todos.assignTo": "Tildel til",
   "todos.dueDate": "Forfaldsdato",
   "todos.adding": "Tilføjer…",
+  "todos.usersLoadFailed": "Ansvarlige kunne ikke indlæses: {{error}}",
   "history.empty": "Ingen historik endnu.",
   "history.by": "af {{user}}",
   "history.events.created": "Oprettet",

@@ -665,12 +665,17 @@ describe("CardDetail — inline subtype editing", () => {
     expect(mockApi.callsOf("patch")[1].body).toEqual({ subtype: null });
   });
 
-  it("replaces the page with the error when the subtype save fails", async () => {
+  it("shows the error beside the card when the subtype save fails", async () => {
     mockApi.fail("patch", "/cards/c1", 500);
     const { user } = renderPage();
     await user.click(await screen.findByRole("button", { name: "Change subtype" }));
     await user.click(await screen.findByRole("menuitem", { name: "Microservice" }));
-    expect(await screen.findByText("PATCH /cards/c1 failed")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("PATCH /cards/c1 failed");
+    // The card is still on screen, with its subtype unchanged.
+    expect(screen.getByRole("heading", { name: "CRM" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Change subtype" })).toHaveTextContent(
+      "Business Application",
+    );
   });
 
   it("shows a plain subtype label to a reader who cannot edit", async () => {

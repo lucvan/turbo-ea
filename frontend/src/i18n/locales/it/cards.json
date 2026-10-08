@@ -206,6 +206,7 @@
   "todos.assignTo": "Assegna a",
   "todos.dueDate": "Data di scadenza",
   "todos.adding": "Aggiunta…",
+  "todos.usersLoadFailed": "Impossibile caricare gli assegnatari: {{error}}",
   "history.empty": "Nessuna cronologia.",
   "history.by": "di {{user}}",
   "history.events.created": "Creato",

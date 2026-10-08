@@ -26,6 +26,7 @@ import { useTranslation } from "react-i18next";
 import { DateField } from "@/components/DateField";
 import MaterialSymbol from "@/components/MaterialSymbol";
 import { api } from "@/api/client";
+import { useLatestRequest } from "@/hooks/useLatestRequest";
 import type { RecurrenceUnit, Todo, User } from "@/types";
 import { defaultLeadTimeDays } from "@/lib/recurrence/leadTime";
 import { formatRecurrence, RECURRENCE_UNIT_OPTIONS } from "@/lib/recurrence/recurrenceLabel";
@@ -45,6 +46,9 @@ function TodosTab({ fsId }: { fsId: string }) {
   const [error, setError] = useState("");
   // A failed list load: shown instead of the empty state, which would be a lie.
   const [loadError, setLoadError] = useState("");
+  // Why the people to assign to could not be loaded ("" when it was not an
+  // Error); null when they were. Shown in the Add dialog beside the picker.
+  const [usersError, setUsersError] = useState<string | null>(null);
 
   // Recurrence state for the Add dialog.
   const [recurring, setRecurring] = useState(false);
@@ -53,24 +57,30 @@ function TodosTab({ fsId }: { fsId: string }) {
   const [leadTimeDays, setLeadTimeDays] = useState(defaultLeadTimeDays("months", 1));
   const [leadTimeDirty, setLeadTimeDirty] = useState(false);
 
+  // Keyed on the card and also called after every write: only the newest
+  // load may write the list, so a late reply for the card shown before cannot
+  // replace this card's todos (#882).
+  const listRequest = useLatestRequest();
   const load = useCallback(() => {
-    api
-      .get<Todo[]>(`/cards/${fsId}/todos`)
-      .then((rows) => {
+    void listRequest.run(async ({ signal, isCurrent }) => {
+      try {
+        const rows = await api.get<Todo[]>(`/cards/${fsId}/todos`, { signal });
+        if (!isCurrent()) return;
         setTodos(rows);
         setLoadError("");
-      })
-      .catch((err: unknown) =>
-        setLoadError(err instanceof Error ? err.message : t("common:errors.generic")),
-      );
-  }, [fsId, t]);
+      } catch (err: unknown) {
+        if (!isCurrent()) return;
+        setLoadError(err instanceof Error ? err.message : t("common:errors.generic"));
+      }
+    });
+  }, [listRequest, fsId, t]);
   useEffect(load, [load]);
 
   useEffect(() => {
     api
       .get<User[]>("/users")
       .then(setUsers)
-      .catch(() => {});
+      .catch((err: unknown) => setUsersError(err instanceof Error ? err.message : ""));
   }, []);
 
   // Keep the lead-time suggestion in sync with the recurrence rule until the
@@ -311,6 +321,13 @@ function TodosTab({ fsId }: { fsId: string }) {
           {addError && (
             <Alert severity="error" onClose={() => setAddError("")} sx={{ mt: 1 }}>
               {addError}
+            </Alert>
+          )}
+          {usersError !== null && (
+            <Alert severity="error" sx={{ mt: 1 }}>
+              {t("todos.usersLoadFailed", {
+                error: usersError || t("common:errors.generic"),
+              })}
             </Alert>
           )}
           <TextField

@@ -120,6 +120,9 @@ export default function VendorField({
   // the card shown before must never land on this one (#882).
   useAbortableEffect(
     async ({ signal, isCurrent }) => {
+      // The chip is this card's: the previous card's Provider must not stay on
+      // it while the lookup runs, nor after it finds none.
+      setLinkedProvider(null);
       if (!fsId || !relType) return;
       try {
         const rels = await api.get<Relation[]>(
@@ -201,13 +204,16 @@ export default function VendorField({
 
       onChange(newFs.name);
       setInputValue(newFs.name);
-      setLinkedProvider({ id: newFs.id, name: newFs.name });
 
       onProviderSelected?.({ id: newFs.id, name: newFs.name });
 
       if (fsId) {
-        // A link failure is reported by linkProvider itself, under the field.
+        // The chip appears once linkProvider has linked it; a link failure is
+        // reported by linkProvider itself, under the field.
         await linkProvider(newFs.id);
+      } else {
+        // No card to link yet: the chip is the feedback for the pick.
+        setLinkedProvider({ id: newFs.id, name: newFs.name });
       }
       closeConfirm();
     } catch (err) {

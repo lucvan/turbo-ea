@@ -139,6 +139,8 @@ export default function CardDetail() {
   // Inline subtype editing
   const [subtypeAnchor, setSubtypeAnchor] = useState<HTMLElement | null>(null);
   const [subtypeSaving, setSubtypeSaving] = useState(false);
+  // A failed subtype save is shown above the tabs; the card stays on screen.
+  const [subtypeError, setSubtypeError] = useState("");
 
   // PPM auto-computed fields (for Initiative cards with PPM budget/cost lines)
   const [ppmHasBudget, setPpmHasBudget] = useState(false);
@@ -195,6 +197,8 @@ export default function CardDetail() {
   useEffect(() => {
     if (!id) return;
     setApprovalError("");
+    setApprovalBlock(null);
+    setSubtypeError("");
     // Read tab from URL search params (e.g. ?tab=1&subtab=1)
     const urlTab = searchParams.get("tab");
     const urlSubTab = searchParams.get("subtab");
@@ -395,13 +399,14 @@ export default function CardDetail() {
       return;
     }
     setSubtypeSaving(true);
+    setSubtypeError("");
     try {
       const updated = await api.patch<Card>(`/cards/${card.id}`, {
         subtype: next,
       });
       setCard(updated);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : String(err));
+      setSubtypeError(err instanceof Error ? err.message : t("common:errors.generic"));
     } finally {
       setSubtypeSaving(false);
       setSubtypeAnchor(null);
@@ -912,6 +917,13 @@ export default function CardDetail() {
               </Alert>
             )}
 
+            {/* Subtype save failed */}
+            {subtypeError && (
+              <Alert severity="error" sx={{ mb: 2 }} onClose={() => setSubtypeError("")}>
+                {subtypeError}
+              </Alert>
+            )}
+
             {/* Approval transition failed for any other reason */}
             {approvalError && (
               <Alert severity="error" sx={{ mb: 2 }} onClose={() => setApprovalError("")}>
@@ -932,7 +944,10 @@ export default function CardDetail() {
                 <Box component="ul" sx={{ m: 0, pl: 2 }}>
                   {approvalBlock.missing_relations.map((r) => (
                     <li key={`rel-${r.key}-${r.side}`}>
-                      {t("approval.missingRelation", { label: r.label, otherType: r.other_type_key })}
+                      {t("approval.missingRelation", {
+                        label: r.label,
+                        otherType: typeLabel(getType(r.other_type_key)) || r.other_type_key,
+                      })}
                     </li>
                   ))}
                   {approvalBlock.missing_tag_groups.map((g) => (

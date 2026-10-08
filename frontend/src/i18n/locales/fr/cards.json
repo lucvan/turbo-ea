@@ -206,6 +206,7 @@
   "todos.assignTo": "Assigner à",
   "todos.dueDate": "Date d’échéance",
   "todos.adding": "Ajout…",
+  "todos.usersLoadFailed": "Impossible de charger les personnes assignables : {{error}}",
   "history.empty": "Aucun historique pour le moment.",
   "history.by": "par {{user}}",
   "history.events.created": "Créé",

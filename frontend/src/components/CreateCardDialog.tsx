@@ -41,7 +41,7 @@ import {
   useSubtypeLabel,
 } from "@/hooks/useResolveLabel";
 import { useAiStatus, aiSuggestEnabledFor } from "@/hooks/useAiStatus";
-import { useAbortableEffect } from "@/hooks/useLatestRequest";
+import { useAbortableEffect, useLatestRequest } from "@/hooks/useLatestRequest";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { api, ApiError } from "@/api/client";
 import { readableTextColor } from "@/lib/color";
@@ -145,12 +145,20 @@ export default function CreateCardDialog({
   // The (trimmed) name the finished search was for — its verdict says
   // nothing about a name typed since.
   const [eolSearchedName, setEolSearchedName] = useState("");
+  // Why that search failed ("" when it did not) — a failure is not "no match".
+  const [eolSearchError, setEolSearchError] = useState("");
 
   // AI suggestion state
   const { aiStatus } = useAiStatus();
   const [aiResponse, setAiResponse] = useState<AiSuggestResponse | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
+  // A suggestion belongs to the session that asked for it: closing or
+  // reopening the dialog supersedes one still in flight.
+  const aiRequest = useLatestRequest();
+  useEffect(() => {
+    aiRequest.cancel();
+  }, [open, aiRequest]);
 
   // Tag picker state
   const [tagGroups, setTagGroups] = useState<TagGroup[]>([]);
@@ -318,11 +326,13 @@ export default function CreateCardDialog({
         if (!isCurrent()) return;
         setEolSuggestions(results);
         setEolSearchedName(trimmed);
+        setEolSearchError("");
         setEolAutoSearchDone(true);
-      } catch {
+      } catch (err) {
         if (!isCurrent()) return;
         setEolSuggestions([]);
         setEolSearchedName(trimmed);
+        setEolSearchError(err instanceof Error ? err.message : t("eol.errors.fetchFailed"));
         setEolAutoSearchDone(true);
       } finally {
         if (isCurrent()) setEolSearching(false);
@@ -340,21 +350,25 @@ export default function CreateCardDialog({
 
   const handleAiSuggest = async () => {
     if (!selectedType || !name.trim()) return;
-    setAiLoading(true);
-    setAiError("");
-    setAiResponse(null);
-    try {
-      const res = await api.post<AiSuggestResponse>("/ai/suggest", {
-        type_key: selectedType,
-        subtype: subtype || undefined,
-        name: name.trim(),
-      });
-      setAiResponse(res);
-    } catch (err: unknown) {
-      setAiError(err instanceof Error ? err.message : t("common:errors.generic"));
-    } finally {
-      setAiLoading(false);
-    }
+    await aiRequest.run(async ({ isCurrent }) => {
+      setAiLoading(true);
+      setAiError("");
+      setAiResponse(null);
+      try {
+        const res = await api.post<AiSuggestResponse>("/ai/suggest", {
+          type_key: selectedType,
+          subtype: subtype || undefined,
+          name: name.trim(),
+        });
+        if (!isCurrent()) return;
+        setAiResponse(res);
+      } catch (err: unknown) {
+        if (!isCurrent()) return;
+        setAiError(err instanceof Error ? err.message : t("common:errors.generic"));
+      } finally {
+        if (isCurrent()) setAiLoading(false);
+      }
+    });
   };
 
   const handleAiApply = (payload: AiApplyPayload) => {
@@ -971,8 +985,15 @@ export default function CreateCardDialog({
                   </Box>
                 )}
 
+                {/* The search failed: not the same as finding nothing */}
+                {!eolSearching && eolAutoSearchDone && eolSearchError && eolSearchedName === name.trim() && (
+                  <Alert severity="error" sx={{ mt: 1 }}>
+                    {eolSearchError}
+                  </Alert>
+                )}
+
                 {/* No matches found */}
-                {!eolSearching && eolAutoSearchDone && eolSuggestions.length === 0 && eolSearchedName === name.trim() && (
+                {!eolSearching && eolAutoSearchDone && !eolSearchError && eolSuggestions.length === 0 && eolSearchedName === name.trim() && (
                   <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
                     {t("eol.noMatches")}
                   </Typography>
