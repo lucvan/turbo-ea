@@ -205,7 +205,7 @@ describe("VendorField", () => {
     mockApi.reset();
     mockApi.on("get", "/cards?*", cardPage([]));
     mockApi.on("get", /^\/relations/, []);
-    withMetamodel(CARD_TYPES, [provider("relC", 3), { ...provider("relQ", 0), sort_order: undefined } as RelationType, provider("relD", 2)]);
+    withMetamodel(CARD_TYPES, [provider("relC", 3), { ...provider("relQ", 0), sort_order: undefined } as unknown as RelationType, provider("relD", 2)]);
     renderField({ fsId: FS_ID });
     await waitFor(() => expect(mockApi.callsOf("get", /^\/relations/)).toHaveLength(1));
     expect(mockApi.callsOf("get", /^\/relations/)[0].path).toBe(`/relations?card_id=${FS_ID}&type=relQ`);
@@ -259,10 +259,13 @@ describe("VendorField", () => {
   });
 
   it("browses all Providers on open, then relinks the card to the picked one", async () => {
-    // Globex is linked until the POST lands; the re-read afterwards shows Acme.
-    mockApi.on("get", RELATIONS_URL, () =>
-      mockApi.callsOf("post", "/relations").length ? linkedTo(ACME) : [EXISTING],
-    );
+    // Globex is linked until the POST lands, both are until the old link is
+    // deleted, and the re-read afterwards shows Acme alone.
+    mockApi.on("get", RELATIONS_URL, () => {
+      if (!mockApi.callsOf("post", "/relations").length) return [EXISTING];
+      if (!mockApi.callsOf("delete", "/relations/rel-old").length) return [EXISTING, ...linkedTo(ACME)];
+      return linkedTo(ACME);
+    });
     const { user, onChange, onRelationChange, onProviderSelected } = renderField({ fsId: FS_ID });
     await screen.findByText("Globex");
 
@@ -277,13 +280,18 @@ describe("VendorField", () => {
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onProviderSelected).toHaveBeenCalledWith({ id: ACME.id, name: "Acme Corp" });
     await waitFor(() => expect(onRelationChange).toHaveBeenCalledTimes(1));
-    // The old link goes first, then the new one in the type's direction.
-    expect(mockApi.callsOf("delete", "/relations/rel-old")).toHaveLength(1);
+    // The new link goes first, in the type's direction; only then the old one,
+    // and never the new one.
     expect(mockApi.callsOf("post", "/relations")[0].body).toEqual({
       type: REL_PROVIDER_TO_ITC.key,
       source_id: ACME.id,
       target_id: FS_ID,
     });
+    expect(
+      mockApi.calls
+        .filter((c) => c.method === "post" || c.method === "delete")
+        .map((c) => `${c.method} ${c.path}`),
+    ).toEqual(["post /relations", "delete /relations/rel-old"]);
     expect(await screen.findByText("Acme Corp")).toBeInTheDocument();
     expect(screen.getByLabelText("Provider")).toHaveValue("Acme Corp");
   });
@@ -632,6 +640,9 @@ describe("VendorField", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("POST /relations failed");
     expect(onRelationChange).not.toHaveBeenCalled();
+    // The card keeps the Provider it had, and the chip still says so.
+    expect(mockApi.callsOf("delete")).toHaveLength(0);
+    expect(screen.getByText("Globex", { selector: ".MuiChip-label" })).toBeInTheDocument();
 
     mockApi.on("post", "/relations", {});
     await user.click(screen.getByLabelText("Provider"));

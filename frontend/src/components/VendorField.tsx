@@ -237,20 +237,24 @@ export default function VendorField({
 
     setLinkError("");
     try {
-      // Remove existing provider relations first
-      const existing = await api.get<Relation[]>(
-        `/relations?card_id=${fsId}&type=${relType}`
-      );
-      for (const r of existing) {
-        await api.delete(`/relations/${r.id}`);
-      }
-
-      // Create new relation respecting the metamodel direction
+      // Link the new Provider first, respecting the metamodel direction, so a
+      // failed link leaves the card with the Provider it had. POST /relations
+      // checks no cardinality and is idempotent on the pair, so re-picking
+      // the linked Provider keeps its row.
       await api.post("/relations", {
         type: relType,
         source_id: providerIsSource ? providerId : fsId,
         target_id: providerIsSource ? fsId : providerId,
       });
+
+      // Then remove the card's other Provider relations of this type.
+      const existing = await api.get<Relation[]>(
+        `/relations?card_id=${fsId}&type=${relType}`
+      );
+      for (const r of existing) {
+        const providerEnd = r.target_id === fsId ? r.source_id : r.target_id;
+        if (providerEnd !== providerId) await api.delete(`/relations/${r.id}`);
+      }
 
       setLinkedProvider({ id: providerId, name: "" });
 

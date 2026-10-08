@@ -753,7 +753,10 @@ describe("CardDetail — logo menu, scroll and mobile", () => {
 
     await user.click(screen.getByLabelText("Change logo"));
     await user.click(await screen.findByText("logo-error"));
-    expect(await screen.findByText("Logo failed")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Logo failed");
+    // Beside the card, not instead of it.
+    expect(screen.getByRole("heading", { name: "CRM" })).toBeInTheDocument();
+    expect(screen.getByTestId("content")).toBeInTheDocument();
   });
 
   it("shows a back-to-top button once the page is scrolled", async () => {

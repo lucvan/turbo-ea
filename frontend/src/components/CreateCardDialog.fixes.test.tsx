@@ -1,14 +1,14 @@
 /**
  * CreateCardDialog regressions: an AI suggestion still in flight when the
- * dialog closes belongs to that session, and must not land in the next one;
- * and a failed end-of-life auto-search clears once a search for the current
- * name succeeds.
+ * dialog closes, or when another type is picked, belongs to the session and
+ * type that asked for it, and must not land after them; and a failed
+ * end-of-life auto-search clears once a search for the current name succeeds.
  *
  * `EolLinkDialog`, `VendorField` and `TagPicker` are stubbed down to the
  * callbacks the dialog wires — each has its own tests.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 
@@ -66,6 +66,12 @@ function deferred<T>() {
 
 const nameBox = () => screen.getByRole("textbox", { name: /^Name/ });
 const suggestButton = () => screen.queryByRole("button", { name: /Suggest with AI/ });
+
+/** MUI's Select does not name its combobox after the InputLabel; go via the label. */
+function typeSelect(): HTMLElement {
+  const formControl = screen.getByText("Type", { selector: "label" }).closest(".MuiFormControl-root");
+  return within(formControl as HTMLElement).getByRole("combobox");
+}
 
 beforeEach(() => {
   hookState.reset();
@@ -172,6 +178,53 @@ describe("CreateCardDialog — an AI suggestion from a closed session", () => {
     });
     expect(await screen.findByText("AI Suggestions")).toBeInTheDocument();
     expect(screen.queryByText("Generating description...")).not.toBeInTheDocument();
+  });
+});
+
+describe("CreateCardDialog — an AI suggestion for the type picked before", () => {
+  async function askThenSwitchType(reply: Promise<unknown>) {
+    mockApi.on("post", "/ai/suggest", () => reply);
+    const { user } = renderDialog();
+    fireEvent.change(nameBox(), { target: { value: "Salesforce" } });
+    await user.click(suggestButton()!);
+    expect(await screen.findByText("Generating description...")).toBeInTheDocument();
+
+    await user.click(typeSelect());
+    await user.click(await screen.findByRole("option", { name: /IT Component/ }));
+    await waitFor(() => expect(typeSelect()).toHaveTextContent("IT Component"));
+    return user;
+  }
+
+  it("stops waiting for it once another type is picked", async () => {
+    await askThenSwitchType(deferred<unknown>().promise);
+    await waitFor(() =>
+      expect(screen.queryByText("Generating description...")).not.toBeInTheDocument(),
+    );
+    // The new type may ask for its own suggestion straight away.
+    expect(suggestButton()).toBeInTheDocument();
+  });
+
+  it("does not land once another type is picked", async () => {
+    const reply = deferred<unknown>();
+    await askThenSwitchType(reply.promise);
+    await act(async () => {
+      reply.resolve({
+        suggestions: { description: { value: "A CRM platform.", confidence: 0.9 } },
+        sources: [],
+      });
+    });
+    expect(screen.queryByText("AI Suggestions")).not.toBeInTheDocument();
+    expect(screen.queryByText("A CRM platform.")).not.toBeInTheDocument();
+  });
+
+  it("does not show its failure for the new type either", async () => {
+    const reply = deferred<unknown>();
+    await askThenSwitchType(reply.promise);
+    await act(async () => {
+      reply.reject(new Error("LLM timed out"));
+    });
+    expect(screen.queryByText("AI Suggestion Failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("LLM timed out")).not.toBeInTheDocument();
   });
 });
 

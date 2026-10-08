@@ -1,13 +1,14 @@
 /**
  * CardDetail regressions: the mandatory-items list names the other card type
- * by its label, the list does not follow the user to the next card, and a
- * failed subtype save is shown beside the card instead of replacing the page.
+ * by its label and the relation by its translated verb, the list does not
+ * follow the user to the next card, and a failed subtype save or logo action
+ * is shown beside the card instead of replacing the page.
  *
  * `CardDetailContent`, the dialogs, the logo menu and the approval badge are
  * stubbed down to the props CardDetail hands them — each has its own tests.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 
@@ -44,7 +45,22 @@ vi.mock("@/features/cards/CardDetailContent", () => ({
 
 vi.mock("@/features/cards/ArchiveDeleteDialog", () => ({ default: () => null }));
 vi.mock("@/features/cards/RestoreDialog", () => ({ default: () => null }));
-vi.mock("@/components/CardLogoMenu", () => ({ default: () => null }));
+vi.mock("@/components/CardLogoMenu", () => ({
+  default: ({
+    cardId,
+    onChanged,
+    onError,
+  }: {
+    cardId: string;
+    onChanged: (id: string, at: string | null) => void;
+    onError?: (message: string) => void;
+  }) => (
+    <div>
+      <button onClick={() => onError?.("Logo upload failed")}>logo-fail</button>
+      <button onClick={() => onChanged(cardId, "2026-10-01T00:00:00Z")}>logo-ok</button>
+    </div>
+  ),
+}));
 
 vi.mock("@/components/ApprovalStatusBadge", () => ({
   default: ({
@@ -65,8 +81,9 @@ import CardDetail from "./CardDetail";
 import { ApiError } from "@/api/client";
 import { mockApi } from "@/test/apiMock";
 import { hookState, withMetamodel } from "@/test/hooks";
-import { makeCardType, makeSubtype } from "@/test/fixtures/metamodel";
+import { makeCardType, makeRelationType, makeSubtype } from "@/test/fixtures/metamodel";
 import { renderWithProviders } from "@/test/render";
+import i18n from "@/i18n";
 import type { Card } from "@/types";
 
 const APP = makeCardType({
@@ -233,6 +250,95 @@ describe("CardDetail — a failed subtype save", () => {
     await user.click(await screen.findByRole("button", { name: "Change subtype" }));
     await user.click(await screen.findByRole("menuitem", { name: "Microservice" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("PATCH /cards/c1 failed");
+
+    await user.click(screen.getByRole("link", { name: "go-c2" }));
+    await waitFor(() => expect(screen.getByTestId("content")).toHaveAttribute("data-name", "ERP"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+describe("CardDetail — the verb of a missing mandatory relation", () => {
+  const USES = makeRelationType({
+    key: "relAppToITC",
+    label: "uses",
+    reverse_label: "is used by",
+    source_type_key: "Application",
+    target_type_key: "ITComponent",
+    translations: { label: { de: "verwendet" }, reverse_label: { de: "wird verwendet von" } },
+  });
+  const SUPPLIES = makeRelationType({
+    key: "relProviderToApp",
+    label: "supplies",
+    reverse_label: "is supplied by",
+    source_type_key: "Provider",
+    target_type_key: "Application",
+    translations: { label: { de: "liefert" }, reverse_label: { de: "wird geliefert von" } },
+  });
+
+  it("is said in the user's language, from the end the card sits on", async () => {
+    withMetamodel([APP, ITC], [USES, SUPPLIES]);
+    mockApi.on("post", /^\/cards\/c1\/approval-status/, () => {
+      // The backend names the verb in its own (untranslated) words.
+      throw new ApiError("blocked", 400, {
+        code: "approval_blocked_mandatory_missing",
+        missing_relations: [
+          { key: "relAppToITC", label: "uses", side: "source", other_type_key: "ITComponent" },
+          { key: "relProviderToApp", label: "is supplied by", side: "target", other_type_key: "Provider" },
+          // A type the metamodel no longer knows keeps the backend's word.
+          { key: "relGone", label: "legacy verb", side: "source", other_type_key: "ITComponent" },
+        ],
+        missing_tag_groups: [],
+      });
+    });
+    const previous = i18n.language;
+    await act(async () => {
+      await i18n.changeLanguage("de");
+    });
+    try {
+      const { user } = renderPage();
+      await user.click(await screen.findByText("approval-approve"));
+      expect(await screen.findByText("Beziehung: verwendet (IT Component)")).toBeInTheDocument();
+      expect(screen.getByText("Beziehung: wird geliefert von (Provider)")).toBeInTheDocument();
+      expect(screen.getByText("Beziehung: legacy verb (IT Component)")).toBeInTheDocument();
+      expect(screen.queryByText(/Beziehung: uses/)).not.toBeInTheDocument();
+    } finally {
+      await act(async () => {
+        await i18n.changeLanguage(previous);
+      });
+    }
+  });
+});
+
+describe("CardDetail — a failed logo action", () => {
+  it("keeps the card on screen and shows the error beside it", async () => {
+    const { user } = renderPage();
+    await user.click(await screen.findByText("logo-fail"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Logo upload failed");
+    // The page is still the card: header, logo menu and content.
+    expect(screen.getByRole("heading", { name: "CRM" })).toBeInTheDocument();
+    expect(screen.getByTestId("content")).toBeInTheDocument();
+    expect(screen.getByText("logo-fail")).toBeInTheDocument();
+
+    await user.click(within(alert).getByRole("button", { name: /close/i }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  it("clears the error once a later logo change goes through", async () => {
+    const { user } = renderPage();
+    await user.click(await screen.findByText("logo-fail"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Logo upload failed");
+
+    await user.click(screen.getByText("logo-ok"));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(screen.getByRole("heading", { name: "CRM" })).toBeInTheDocument();
+  });
+
+  it("does not carry the error over to the next card", async () => {
+    const { user } = renderPage();
+    await user.click(await screen.findByText("logo-fail"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Logo upload failed");
 
     await user.click(screen.getByRole("link", { name: "go-c2" }));
     await waitFor(() => expect(screen.getByTestId("content")).toHaveAttribute("data-name", "ERP"));

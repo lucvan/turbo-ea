@@ -240,11 +240,14 @@ export default function CreateCardDialog({
     setEolCycle("");
     setEolSuggestions([]);
     setEolAutoSearchDone(false);
+    // A suggestion still in flight was asked for the previous type.
+    aiRequest.cancel();
+    setAiLoading(false);
     setAiResponse(null);
     setAiError("");
     setTagIds([]);
     setPendingProvider(null);
-  }, [selectedType, initialType, initialSubtype]);
+  }, [selectedType, initialType, initialSubtype, aiRequest]);
 
   // Set initial type when dialog opens
   useEffect(() => {

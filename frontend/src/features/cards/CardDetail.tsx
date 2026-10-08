@@ -31,7 +31,7 @@ import RestoreDialog from "@/features/cards/RestoreDialog";
 import { useMetamodel } from "@/hooks/useMetamodel";
 import { usePageSubject } from "@/hooks/usePageTitle";
 import { useCardSubtypeLabel } from "@/hooks/useCardSubtypeLabel";
-import { useTypeLabel, useSubtypeLabel } from "@/hooks/useResolveLabel";
+import { useTypeLabel, useSubtypeLabel, useRelationLabel } from "@/hooks/useResolveLabel";
 import { useAiStatus, aiSuggestEnabledFor } from "@/hooks/useAiStatus";
 import { useArchiveRetentionDays } from "@/hooks/useArchiveRetentionDays";
 import { api, ApiError } from "@/api/client";
@@ -72,10 +72,11 @@ export default function CardDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
-  const { getType } = useMetamodel();
+  const { getType, relationTypes } = useMetamodel();
   const { archiveRetentionDays } = useArchiveRetentionDays();
   const typeLabel = useTypeLabel();
   const stLabel = useSubtypeLabel();
+  const relLabel = useRelationLabel();
   const resolveSubtypeLabel = useCardSubtypeLabel();
   const [card, setCard] = useState<Card | null>(null);
   // Browser tab title; falls back to the route's «Card» label while loading,
@@ -94,6 +95,8 @@ export default function CardDetail() {
   // Custom logo (discussion #1024). The menu itself lives in CardLogoMenu,
   // shared with the Inventory grid's Logo column.
   const [logoMenuAnchor, setLogoMenuAnchor] = useState<HTMLElement | null>(null);
+  // A failed logo action is shown above the tabs; the card stays on screen.
+  const [logoError, setLogoError] = useState("");
 
   // Favorite star
   const [isFavorite, setIsFavorite] = useState(false);
@@ -199,6 +202,7 @@ export default function CardDetail() {
     setApprovalError("");
     setApprovalBlock(null);
     setSubtypeError("");
+    setLogoError("");
     // Read tab from URL search params (e.g. ?tab=1&subtab=1)
     const urlTab = searchParams.get("tab");
     const urlSubTab = searchParams.get("subtab");
@@ -859,11 +863,12 @@ export default function CardDetail() {
         hasLogo={!!card.logo_updated_at}
         anchorEl={logoMenuAnchor}
         onClose={() => setLogoMenuAnchor(null)}
-        onChanged={(_id, logoUpdatedAt) =>
-          setCard((prev) => (prev ? { ...prev, logo_updated_at: logoUpdatedAt } : prev))
-        }
+        onChanged={(_id, logoUpdatedAt) => {
+          setLogoError("");
+          setCard((prev) => (prev ? { ...prev, logo_updated_at: logoUpdatedAt } : prev));
+        }}
         onNotify={setSnack}
-        onError={setError}
+        onError={setLogoError}
       />
 
       <Snackbar
@@ -924,6 +929,13 @@ export default function CardDetail() {
               </Alert>
             )}
 
+            {/* Logo upload / icon / removal failed */}
+            {logoError && (
+              <Alert severity="error" sx={{ mb: 2 }} onClose={() => setLogoError("")}>
+                {logoError}
+              </Alert>
+            )}
+
             {/* Approval transition failed for any other reason */}
             {approvalError && (
               <Alert severity="error" sx={{ mb: 2 }} onClose={() => setApprovalError("")}>
@@ -945,7 +957,13 @@ export default function CardDetail() {
                   {approvalBlock.missing_relations.map((r) => (
                     <li key={`rel-${r.key}-${r.side}`}>
                       {t("approval.missingRelation", {
-                        label: r.label,
+                        // The backend's verb is the untranslated label; the
+                        // metamodel's type says it in the user's language.
+                        label:
+                          relLabel(
+                            relationTypes.find((rt) => rt.key === r.key),
+                            r.side === "target",
+                          ) || r.label,
                         otherType: typeLabel(getType(r.other_type_key)) || r.other_type_key,
                       })}
                     </li>
