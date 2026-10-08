@@ -432,6 +432,13 @@ export default function SurveyBuilder() {
     }
   }, [relatedRelationTypes, relationTypeKey, relatedKnown]);
 
+  // The create of a draft that has no id yet. One at a time: a double click,
+  // or Save Draft followed by Next (or the preview) before the reply, would
+  // otherwise each find no id and POST a survey of its own. Kept once it has
+  // succeeded, so a save whose `surveyId` was captured before the new id
+  // rendered still finds the survey it made.
+  const creatingRef = useRef<Promise<string> | null>(null);
+
   // Save draft
   const saveDraft = useCallback(async () => {
     setSaving(true);
@@ -451,13 +458,29 @@ export default function SurveyBuilder() {
         await api.patch(`/surveys/${surveyId}`, body);
         return surveyId;
       }
-      const created = await api.post<Survey>("/surveys", body);
-      setSurveyId(created.id);
-      window.history.replaceState(null, "", `/admin/surveys/${created.id}`);
+      if (creatingRef.current) {
+        // Another save is creating the draft: wait for that survey, then write
+        // this call's own snapshot to it rather than creating a second one.
+        const sid = await creatingRef.current;
+        await api.patch(`/surveys/${sid}`, body);
+        return sid;
+      }
+      const creating = api.post<Survey>("/surveys", body).then((created) => created.id);
+      creatingRef.current = creating;
+      let createdId: string;
+      try {
+        createdId = await creating;
+      } catch (e) {
+        // No draft was made, so the next save may try again.
+        creatingRef.current = null;
+        throw e;
+      }
+      setSurveyId(createdId);
+      window.history.replaceState(null, "", `/admin/surveys/${createdId}`);
       // Returned, not just stored: `setSurveyId` does not update the `surveyId`
       // a caller already captured, so a caller that awaited us and then read
       // that variable would still see "" and create a *second* survey.
-      return created.id;
+      return createdId;
     } catch (e) {
       setError(e instanceof Error ? e.message : t("common:errors.generic"));
       return null;
@@ -614,7 +637,13 @@ export default function SurveyBuilder() {
     );
   };
 
+  // Next is waiting on its auto-save. A second click meanwhile is ignored:
+  // it would save again and advance twice — past the Fields step's validation.
+  const advancingRef = useRef(false);
+  const [advancing, setAdvancing] = useState(false);
+
   const handleNext = async () => {
+    if (advancingRef.current) return;
     if (activeStep === 0 && !name.trim()) {
       setError(t("surveyBuilder.validation.nameRequired"));
       return;
@@ -647,12 +676,18 @@ export default function SurveyBuilder() {
       return;
     }
 
-    // Auto-save on step changes
-    if (targetTypeKey && name.trim()) {
-      await saveDraft();
+    advancingRef.current = true;
+    setAdvancing(true);
+    try {
+      // Auto-save on step changes
+      if (targetTypeKey && name.trim()) {
+        await saveDraft();
+      }
+      setActiveStep((prev) => prev + 1);
+    } finally {
+      advancingRef.current = false;
+      setAdvancing(false);
     }
-
-    setActiveStep((prev) => prev + 1);
   };
 
   const handleBack = () => {
@@ -834,7 +869,12 @@ export default function SurveyBuilder() {
               size="small"
               fullWidth
               label={t("surveyBuilder.target.viaRelation")}
-              value={relationTypeKey}
+              // The effect above clears a relation that no longer applies, but
+              // a render late: show «Any relation» meanwhile rather than hand
+              // the select a value it does not offer.
+              value={
+                relatedRelationTypes.some((rt) => rt.key === relationTypeKey) ? relationTypeKey : ""
+              }
               onChange={(e) => setRelationTypeKey(e.target.value)}
               // "" is "Any relation": without displayEmpty MUI renders it blank.
               slotProps={{ select: { displayEmpty: true } }}
@@ -1514,6 +1554,7 @@ export default function SurveyBuilder() {
             <Button
               variant="contained"
               onClick={handleNext}
+              disabled={advancing}
               endIcon={<MaterialSymbol icon="arrow_forward" size={18} />}
               sx={{ textTransform: "none" }}
             >

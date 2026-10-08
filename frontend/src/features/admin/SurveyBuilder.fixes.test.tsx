@@ -530,3 +530,176 @@ describe("SurveyBuilder — the Via relation select", () => {
     );
   });
 });
+
+/** Name the survey, then on the Target step pick Application and a role. */
+async function toTargetReady(user: ReturnType<typeof renderBuilder>["user"]) {
+  await user.type(await screen.findByLabelText(/Survey Name/), "Owner check");
+  await user.click(next());
+  await screen.findByText("Target Cards");
+  await user.click(screen.getByRole("combobox", { name: /^Type/ }));
+  await user.click(await screen.findByRole("option", { name: /Application/ }));
+  await user.click(screen.getByRole("checkbox", { name: /Business Owner/ }));
+}
+
+describe("SurveyBuilder — Next acts once", () => {
+  it("creates one draft and moves one step on a double click before the draft exists", async () => {
+    const created = deferred<{ id: string }>();
+    mockApi.on("post", "/surveys", () => created.promise);
+    const { user } = renderBuilder();
+    await toTargetReady(user);
+
+    await user.dblClick(next());
+    await waitFor(() => expect(mockApi.callsOf("post", "/surveys")).toHaveLength(1));
+    expect(next()).toBeDisabled();
+
+    await act(async () => created.resolve({ id: "survey-1" }));
+    // The Fields step, with its own validation still ahead — not the preview.
+    expect(await screen.findByText("Select Fields")).toBeInTheDocument();
+    expect(screen.queryByText("Preview & Send", { selector: "h6" })).not.toBeInTheDocument();
+    expect(mockApi.callsOf("post", "/surveys")).toHaveLength(1);
+    await waitFor(() => expect(next()).toBeEnabled());
+  });
+
+  it("ignores a second click that lands before the first one re-renders", async () => {
+    const created = deferred<{ id: string }>();
+    mockApi.on("post", "/surveys", () => created.promise);
+    const { user } = renderBuilder();
+    await toTargetReady(user);
+
+    const button = next();
+    await act(async () => {
+      button.click();
+      button.click();
+    });
+    expect(mockApi.callsOf("post", "/surveys")).toHaveLength(1);
+
+    await act(async () => created.resolve({ id: "survey-1" }));
+    expect(await screen.findByText("Select Fields")).toBeInTheDocument();
+    expect(screen.queryByText("Preview & Send", { selector: "h6" })).not.toBeInTheDocument();
+  });
+});
+
+describe("SurveyBuilder — one draft however the saves overlap", () => {
+  it("creates one survey on a double click of Save Draft", async () => {
+    const created = deferred<{ id: string }>();
+    mockApi.on("post", "/surveys", () => created.promise);
+    const { user } = renderBuilder();
+    await toTargetReady(user);
+
+    const save = screen.getByRole("button", { name: /Save Draft/ });
+    await act(async () => {
+      save.click();
+      save.click();
+    });
+    await act(async () => created.resolve({ id: "survey-1" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Save Draft/ })).toBeEnabled());
+    expect(mockApi.callsOf("post", "/surveys")).toHaveLength(1);
+  });
+
+  it("does not create a second survey when Next follows Save Draft", async () => {
+    const created = deferred<{ id: string }>();
+    mockApi.on("post", "/surveys", () => created.promise);
+    const { user } = renderBuilder();
+    await toTargetReady(user);
+
+    await user.click(screen.getByRole("button", { name: /Save Draft/ }));
+    await waitFor(() => expect(mockApi.callsOf("post", "/surveys")).toHaveLength(1));
+    await user.click(next());
+    expect(mockApi.callsOf("post", "/surveys")).toHaveLength(1);
+
+    await act(async () => created.resolve({ id: "survey-1" }));
+    expect(await screen.findByText("Select Fields")).toBeInTheDocument();
+    expect(mockApi.callsOf("post", "/surveys")).toHaveLength(1);
+    // Next's own save went to the survey Save Draft created.
+    await waitFor(() => expect(mockApi.callsOf("patch", "/surveys/survey-1")).toHaveLength(1));
+  });
+
+  it("previews the survey Save Draft is creating instead of creating another", async () => {
+    let attempt = 0;
+    const created = deferred<{ id: string }>();
+    mockApi.on("post", "/surveys", () => {
+      attempt += 1;
+      if (attempt === 1) throw new Error("db down");
+      return created.promise;
+    });
+    const { user } = renderBuilder();
+    await toTargetReady(user);
+    await user.click(next());
+    // The Target step's auto-save was refused: there is still no draft id.
+    expect(await screen.findByText("db down")).toBeInTheDocument();
+    await screen.findByText("Select Fields");
+    await user.click(screen.getByText("Criticality"));
+
+    await user.click(screen.getByRole("button", { name: /Save Draft/ }));
+    await waitFor(() => expect(mockApi.callsOf("post", "/surveys")).toHaveLength(2));
+    await user.click(next());
+    await screen.findByText("Preview & Send", { selector: "h6" });
+
+    await act(async () => created.resolve({ id: "survey-1" }));
+    expect(await screen.findByText("CRM")).toBeInTheDocument();
+    // The refused save and ONE create; the preview read that survey, after the
+    // write that carries the field just ticked.
+    expect(mockApi.callsOf("post", "/surveys")).toHaveLength(2);
+    expect(mockApi.callsOf("post", /\/preview$/).map((c) => c.path)).toEqual([
+      "/surveys/survey-1/preview",
+    ]);
+    expect((lastDraft().fields as { key: string }[]).map((f) => f.key)).toEqual(["criticality"]);
+  });
+});
+
+describe("SurveyBuilder — the Via relation select when the related cards change", () => {
+  const ITC = makeCardType({ key: "ITComponent", label: "IT Component" });
+  const APP_RUNS_ON_ITC = makeRelationType({
+    key: "relAppToITC",
+    source_type_key: "Application",
+    target_type_key: "ITComponent",
+    label: "runs on",
+    reverse_label: "hosts",
+  });
+  const ITC_SERVES_APP = makeRelationType({
+    key: "relITCToApp",
+    source_type_key: "ITComponent",
+    target_type_key: "Application",
+    label: "serves",
+    reverse_label: "is served by",
+  });
+
+  beforeEach(() => {
+    withMetamodel(
+      [APP, ORG, RETIRED, ITC],
+      [ORG_OWNS_APP, APP_USED_BY_ORG, APP_RUNS_ON_ITC, ITC_SERVES_APP],
+    );
+  });
+
+  it("shows «Any relation», without MUI's out-of-range warning, once the chosen one no longer applies", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { user } = renderBuilder();
+      await toTargetReady(user);
+      await user.click(screen.getByText("related: Org"));
+      await user.click(await screen.findByRole("combobox", { name: /Via relation/ }));
+      await user.click(await screen.findByRole("option", { name: "is owned by" }));
+      await waitFor(() =>
+        expect(screen.getByRole("combobox", { name: /Via relation/ })).toHaveTextContent(
+          "is owned by",
+        ),
+      );
+
+      // Cards of another type: the select stays, offering their two relations.
+      await user.click(screen.getByText("related: two ITCs"));
+      await waitFor(() =>
+        expect(screen.getByRole("combobox", { name: /Via relation/ })).toHaveTextContent(
+          "Any relation",
+        ),
+      );
+      await user.click(screen.getByRole("combobox", { name: /Via relation/ }));
+      expect(await screen.findByRole("option", { name: "runs on" })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: "is served by" })).toBeInTheDocument();
+
+      const outOfRange = warn.mock.calls.filter((args) => String(args[0]).includes("out-of-range"));
+      expect(outOfRange).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});

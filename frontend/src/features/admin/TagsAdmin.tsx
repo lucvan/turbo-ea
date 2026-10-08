@@ -147,6 +147,7 @@ export default function TagsAdmin() {
     const payload = {
       ...editGroupDraft,
       name: editGroupDraft.name.trim(),
+      description: editGroupDraft.description.trim() || null,
       restrict_to_types:
         editGroupDraft.restrict_to_types.length > 0
           ? editGroupDraft.restrict_to_types

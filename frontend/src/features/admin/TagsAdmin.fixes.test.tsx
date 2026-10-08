@@ -251,6 +251,36 @@ describe("TagsAdmin edited names", () => {
     });
   });
 
+  it("saves an edited group's description trimmed, as a tag's is", async () => {
+    mockApi.on("patch", `/tag-groups/${RISK_GROUP.id}`, {});
+    const user = await renderPage();
+    await user.click(within(groupCard("Risk")).getByRole("button", { name: "Edit Tag Group" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Description"), "  How risky  ");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(mockApi.callsOf("patch", `/tag-groups/${RISK_GROUP.id}`)).toHaveLength(1),
+    );
+    expect(mockApi.callsOf("patch", `/tag-groups/${RISK_GROUP.id}`)[0].body).toMatchObject({
+      description: "How risky",
+    });
+  });
+
+  it("saves a blank group description as no description", async () => {
+    mockApi.on("patch", `/tag-groups/${RISK_GROUP.id}`, {});
+    const user = await renderPage();
+    await user.click(within(groupCard("Risk")).getByRole("button", { name: "Edit Tag Group" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Description"), "   ");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(mockApi.callsOf("patch", `/tag-groups/${RISK_GROUP.id}`)).toHaveLength(1),
+    );
+    expect(mockApi.callsOf("patch", `/tag-groups/${RISK_GROUP.id}`)[0].body).toMatchObject({
+      description: null,
+    });
+  });
+
   it("saves an edited tag under its trimmed name", async () => {
     mockApi.on("patch", `${tagsPath}/${onPrem.id}`, {});
     const user = await renderPage();

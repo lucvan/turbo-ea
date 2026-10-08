@@ -1,8 +1,9 @@
 /**
  * The relation "type values" editor, regression tests: a custom row's red
  * flag and the Save check read the same rule — the canonical `label`, the
- * fallback every locale without a translation shows — so a row never looks
- * valid while Save refuses it, or the reverse.
+ * fallback every locale without a translation shows — and the name field shows
+ * text exactly when that rule is met, so a row never looks valid while Save
+ * refuses it, or the reverse.
  *
  * Same harness as `RelationTypeValuesDialog.test.tsx`.
  */
@@ -51,30 +52,25 @@ beforeEach(() => {
 });
 
 describe("RelationTypeValuesDialog — a stored row's label", () => {
-  it("flags a row that carries only a translation, as Save refuses it, until it is given a label", async () => {
+  // The name field shows this locale's text, or the label when there is none;
+  // the red flag and Save read the label. A stored row lacking a label takes
+  // this locale's text as one, so what the field shows is what is checked.
+  it("takes a stored row's text here as its label when it has none, and saves it", async () => {
     const { user, dialog } = renderDialog(
       makeField({
         key: "tier",
         label: "",
         translations: { en: "Tier" },
         type: "single_select",
-        options: [makeOption({ key: "gold", label: "", translations: { en: "Gold" } })],
+        // A blank label counts as none.
+        options: [makeOption({ key: "gold", label: "  ", translations: { en: "Gold" } })],
       }),
     );
     const name = within(dialog).getByLabelText(DIM_NAME);
     const value = within(dialog).getByLabelText("Label");
     expect(name).toHaveValue("Tier");
-    expect(name).toHaveAttribute("aria-invalid", "true");
-    expect(value).toHaveAttribute("aria-invalid", "true");
-    expect(saveButton()).toBeDisabled();
-
-    // Typing a name gives the row its label as well as this locale's text.
-    await user.clear(name);
-    await user.type(name, "Tier");
     expect(name).toHaveAttribute("aria-invalid", "false");
-    expect(saveButton()).toBeDisabled();
-    await user.clear(value);
-    await user.type(value, "Gold");
+    expect(value).toHaveValue("Gold");
     expect(value).toHaveAttribute("aria-invalid", "false");
     expect(saveButton()).toBeEnabled();
 
@@ -86,7 +82,7 @@ describe("RelationTypeValuesDialog — a stored row's label", () => {
     expect(saved.options?.[0]).toMatchObject({ label: "Gold", translations: { en: "Gold" } });
   });
 
-  it("does not flag a labelled row whose translation here is empty, and saves it", async () => {
+  it("shows a labelled row's label when its translation here is empty, and saves it", async () => {
     const { user, dialog } = renderDialog(
       makeField({
         key: "tier",
@@ -96,8 +92,12 @@ describe("RelationTypeValuesDialog — a stored row's label", () => {
         options: [makeOption({ key: "gold", label: "Gold", translations: { en: "  " } })],
       }),
     );
-    expect(within(dialog).getByLabelText(DIM_NAME)).toHaveAttribute("aria-invalid", "false");
-    expect(within(dialog).getByLabelText("Label")).toHaveAttribute("aria-invalid", "false");
+    const name = within(dialog).getByLabelText(DIM_NAME);
+    const value = within(dialog).getByLabelText("Label");
+    expect(name).toHaveValue("Tier");
+    expect(name).toHaveAttribute("aria-invalid", "false");
+    expect(value).toHaveValue("Gold");
+    expect(value).toHaveAttribute("aria-invalid", "false");
     expect(saveButton()).toBeEnabled();
 
     await user.click(saveButton());
@@ -109,5 +109,56 @@ describe("RelationTypeValuesDialog — a stored row's label", () => {
     expect(saved.translations).toBeUndefined();
     expect(saved.options?.[0].label).toBe("Gold");
     expect(saved.options?.[0].translations).toBeUndefined();
+  });
+
+  it("shows empty and flags a row whose only text is in another language, until it is named", async () => {
+    const { user, dialog } = renderDialog(
+      makeField({
+        key: "tier",
+        label: "",
+        translations: { de: "Stufe" },
+        type: "single_select",
+        // Blank text here is no text.
+        options: [makeOption({ key: "gold", label: "", translations: { en: "  ", de: "Gold" } })],
+      }),
+    );
+    const name = within(dialog).getByLabelText(DIM_NAME);
+    const value = within(dialog).getByLabelText("Label");
+    expect(name).toHaveValue("");
+    expect(name).toHaveAttribute("aria-invalid", "true");
+    expect(value).toHaveValue("");
+    expect(value).toHaveAttribute("aria-invalid", "true");
+    expect(saveButton()).toBeDisabled();
+
+    await user.type(name, "Tier");
+    await user.type(value, "Gold");
+    expect(name).toHaveAttribute("aria-invalid", "false");
+    expect(value).toHaveAttribute("aria-invalid", "false");
+    await user.click(saveButton());
+    await waitFor(() => expect(mockApi.callsOf("patch", PATH)).toHaveLength(1));
+    const [saved] = (mockApi.callsOf("patch", PATH)[0].body as { attributes_schema: FieldDef[] })
+      .attributes_schema;
+    expect(saved).toMatchObject({ label: "Tier", translations: { de: "Stufe", en: "Tier" } });
+  });
+
+  it("leaves a built-in row's stored label alone", async () => {
+    const { user } = renderDialog(
+      makeField({
+        key: "usage",
+        label: "",
+        translations: { en: "Usage" },
+        type: "single_select",
+        built_in: true,
+        options: [
+          makeOption({ key: "owner", label: "", translations: { en: "Owner" }, built_in: true }),
+        ],
+      }),
+    );
+    await user.click(saveButton());
+    await waitFor(() => expect(mockApi.callsOf("patch", PATH)).toHaveLength(1));
+    const [saved] = (mockApi.callsOf("patch", PATH)[0].body as { attributes_schema: FieldDef[] })
+      .attributes_schema;
+    expect(saved.label).toBe("");
+    expect(saved.options?.[0].label).toBe("");
   });
 });
