@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
+import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import IconButton from "@mui/material/IconButton";
@@ -29,6 +30,7 @@ export default function MyFavoritesSection() {
   const [loading, setLoading] = useState(true);
   const [cards, setCards] = useState<CardType[]>([]);
   const [undoSnack, setUndoSnack] = useState<CardType | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -55,13 +57,16 @@ export default function MyFavoritesSection() {
     // back if the request fails.
     setCards((prev) => prev.filter((c) => c.id !== card.id));
     setUndoSnack(card);
+    setError(null);
     try {
       await api.delete(`/favorites/${card.id}`);
-    } catch {
+    } catch (err) {
       setCards((prev) =>
         prev.some((c) => c.id === card.id) ? prev : [card, ...prev].slice(0, MAX_VISIBLE),
       );
-      setUndoSnack(null);
+      // Only this card's undo goes — a later removal keeps its own.
+      setUndoSnack((cur) => (cur?.id === card.id ? null : cur));
+      setError(err instanceof Error ? err.message : t("common:errors.generic"));
     }
   };
 
@@ -85,6 +90,11 @@ export default function MyFavoritesSection() {
       iconColor="#f5a623"
       title={t("common:dashboard.workspace.myFavorites")}
     >
+      {error && (
+        <Alert severity="error" onClose={() => setError(null)} sx={{ mb: 1 }}>
+          {error}
+        </Alert>
+      )}
       {loading ? (
         <LinearProgress />
       ) : cards.length === 0 ? (

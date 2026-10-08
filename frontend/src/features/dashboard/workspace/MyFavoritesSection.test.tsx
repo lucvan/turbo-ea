@@ -66,6 +66,9 @@ const removeButton = (name: string) =>
     name: "Remove from favorites",
   });
 
+/** The error alert holding `el` — not the undo snackbar, which is an alert too. */
+const errorAlert = (el: HTMLElement) => el.closest(".MuiAlert-standardError");
+
 beforeEach(() => {
   mockApi.reset();
   hookState.reset();
@@ -163,6 +166,30 @@ describe("MyFavoritesSection", () => {
     await waitFor(() =>
       expect(screen.queryByText("Removed «SAP HANA» from favorites")).not.toBeInTheDocument(),
     );
+    expect(errorAlert(await screen.findByText("DELETE /favorites/c2 failed"))).toBeInTheDocument();
+  });
+
+  it("keeps the undo of a later removal when an earlier one fails", async () => {
+    const removal = deferred<null>();
+    mockApi.on("delete", "/favorites/c1", () => removal.promise);
+    const { user } = renderSection();
+    await screen.findByText("NexaCore ERP");
+    await user.click(removeButton("NexaCore ERP"));
+    await waitFor(() => expect(mockApi.callsOf("delete", "/favorites/c1")).toHaveLength(1));
+    await user.click(removeButton("SAP HANA"));
+    expect(await screen.findByText("Removed «SAP HANA» from favorites")).toBeInTheDocument();
+
+    // The first removal now fails: its card comes back with an error, and
+    // the second card's undo stays on offer.
+    await settle(mockApi.api.delete.mock.results[0].value as Promise<unknown>, () =>
+      removal.reject(new Error("offline")),
+    );
+    expect(await screen.findByText("NexaCore ERP")).toBeInTheDocument();
+    expect(errorAlert(screen.getByText("offline"))).toBeInTheDocument();
+    expect(screen.getByText("Removed «SAP HANA» from favorites")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(mockApi.callsOf("post", "/favorites/c2")).toHaveLength(1));
+    expect(await screen.findByText("SAP HANA")).toBeInTheDocument();
   });
 
   it("puts back the only favourite when its removal fails", async () => {

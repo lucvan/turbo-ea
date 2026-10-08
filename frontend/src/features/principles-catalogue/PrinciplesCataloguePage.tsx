@@ -124,6 +124,21 @@ export default function PrinciplesCataloguePage() {
       setImportResult(result);
       setSelected(new Set());
       setImportOpen(false);
+      // Mark what now exists straight from the response, so the list is right
+      // even if the reload below fails (its error then shows above the list).
+      const nowExisting = new Map(
+        [...result.created, ...result.skipped]
+          .filter((r) => r.principle_id)
+          .map((r) => [r.catalogue_id, r.principle_id]),
+      );
+      setPayload((prev) =>
+        prev && {
+          ...prev,
+          principles: prev.principles.map((p) =>
+            nowExisting.has(p.id) ? { ...p, existing_principle_id: nowExisting.get(p.id)! } : p,
+          ),
+        },
+      );
       await reload();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);

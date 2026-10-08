@@ -332,6 +332,36 @@ describe("PrinciplesCataloguePage — import", () => {
     await waitFor(() => expect(screen.queryByText("catalogue offline")).not.toBeInTheDocument());
   });
 
+  it("marks what the import created as imported even when the reload fails", async () => {
+    let gets = 0;
+    mockApi.on("get", "/principles-catalogue", () => {
+      gets += 1;
+      return gets === 2 ? Promise.reject(new Error("catalogue offline")) : PAYLOAD;
+    });
+    mockApi.on("post", "/principles-catalogue/import", {
+      created: [{ catalogue_id: "PR-001", principle_id: "ep-9" }],
+      skipped: [{ catalogue_id: "PR-002", principle_id: "ep-2", reason: "already_imported" }],
+      catalogue_version: "2026.1",
+    });
+    const { user } = renderPage();
+    await screen.findByText("Data is an Asset");
+    expect(screen.getByText("Showing 3 of 3 — 2 not yet imported")).toBeInTheDocument();
+
+    await importSelection(user, "Data is an Asset", "Reuse before Buy");
+    const done = await screen.findByRole("dialog", { name: "Import complete" });
+    expect(await screen.findByText("catalogue offline")).toBeInTheDocument();
+    await user.click(within(done).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    // Neither can be picked for a second import.
+    for (const title of ["Data is an Asset", "Reuse before Buy"]) {
+      expect(within(cardOf(title)).getByText("Already imported")).toBeInTheDocument();
+      expect(within(cardOf(title)).queryByRole("checkbox")).not.toBeInTheDocument();
+    }
+    expect(screen.getByText("Showing 3 of 3 — 0 not yet imported")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select all visible" })).toBeDisabled();
+  });
+
   it("locks the dialog while the import runs, and a retry clears the previous error", async () => {
     let posts = 0;
     const second = deferred<object>();

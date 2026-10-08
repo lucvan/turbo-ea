@@ -312,6 +312,13 @@ describe("OverviewTab — charts", () => {
     ]);
   });
 
+  it("labels an approval status it has no translation for by its raw value", async () => {
+    mockApi.on("get", "/reports/dashboard", { ...DATA, approval_statuses: { APPROVED: 3, ON_HOLD: 2 } });
+    renderTab();
+    await screen.findByText("Approval Status Distribution");
+    expect(buttonsIn("Approval Status Distribution")).toEqual(["Approved: 3", "ON_HOLD: 2"]);
+  });
+
   it("ignores a click Recharts cannot map to a bar or a slice", async () => {
     const errors: unknown[] = [];
     const onError = (e: ErrorEvent) => {

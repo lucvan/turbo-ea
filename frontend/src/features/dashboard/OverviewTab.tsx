@@ -74,7 +74,7 @@ export default function OverviewTab() {
     return Object.entries(data.approval_statuses)
       .filter(([, v]) => v > 0)
       .map(([k, v]) => ({
-        name: t(`status.${k.toLowerCase()}`) || k,
+        name: t(`status.${k.toLowerCase()}`, { defaultValue: k }),
         value: v,
         color:
           APPROVAL_STATUS_COLORS[k as keyof typeof APPROVAL_STATUS_COLORS] ||
