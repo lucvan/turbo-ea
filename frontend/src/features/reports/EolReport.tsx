@@ -27,6 +27,7 @@ import { useTypeLabel } from "@/hooks/useResolveLabel";
 import CardDetailSidePanel from "@/components/CardDetailSidePanel";
 import { api } from "@/api/client";
 import { toLocalDate } from "@/lib/dates";
+import { useDateFormat } from "@/hooks/useDateFormat";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -113,13 +114,14 @@ function fmtDate(
   s: string | boolean | undefined | null,
   t: (key: string) => string,
   trueLabel: string,
+  formatDate: (d: Date) => string,
 ): string {
   if (s === true) return trueLabel;
   if (s === false) return t("common:labels.no");
   if (!s || typeof s !== "string") return "\u2014";
   const d = toLocalDate(s);
   if (!d) return "\u2014";
-  return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+  return formatDate(d);
 }
 
 /** "product cycle", or as much of it as is known ("" for a card with no EOL link). */
@@ -235,8 +237,10 @@ export default function EolReport() {
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
-  const fmtEol = (s: CycleData["eol"]) => fmtDate(s, t, t("eol.yesEol"));
-  const fmtSupport = (s: CycleData["support"]) => fmtDate(s, t, t("common:labels.yes"));
+  const { formatDate } = useDateFormat();
+  const fmtEol = (s: CycleData["eol"]) => fmtDate(s, t, t("eol.yesEol"), formatDate);
+  const fmtSupport = (s: CycleData["support"]) =>
+    fmtDate(s, t, t("common:labels.yes"), formatDate);
 
   // Load saved report config
   useEffect(() => {
@@ -756,7 +760,7 @@ export default function EolReport() {
                     const eolDays =
                       typeof cd?.eol === "string" ? daysUntil(cd.eol) : null;
                     const productLabel = isManual ? t("eol.manual") : productName(item);
-                    const tipText = `${productLabel ? `${productLabel} \u00B7 ` : ""}EOL: ${fmtEol(cd?.eol)}${eolDays !== null ? ` (${countdownLabel(eolDays)})` : ""}`;
+                    const tipText = `${productLabel ? `${productLabel} \u00B7 ` : ""}${t("eol.endOfLifeDate", { date: fmtEol(cd?.eol) })}${eolDays !== null ? ` (${countdownLabel(eolDays)})` : ""}`;
 
                     return (
                       <Box key={item.id}>
@@ -873,7 +877,7 @@ export default function EolReport() {
                                 fontStyle: isManual ? "italic" : "normal",
                               }}
                             >
-                              {isManual ? "lifecycle" : productLabel}
+                              {isManual ? t("cards:lifecycle.title") : productLabel}
                             </Typography>
                           </Box>
                         </Box>

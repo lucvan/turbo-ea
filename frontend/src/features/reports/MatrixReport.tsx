@@ -294,8 +294,11 @@ export default function MatrixReport() {
       }
       if (cfg.hideEmpty !== undefined) setHideEmpty(cfg.hideEmpty as boolean);
       if (typeof cfg.showOnlyGaps === "boolean") setShowOnlyGaps(cfg.showOnlyGaps);
-      if (cfg.sortRows) setSortRows(cfg.sortRows as SortMode);
-      if (cfg.sortCols) setSortCols(cfg.sortCols as SortMode);
+      // A config without a sort opens the axis on its type's default — the
+      // hierarchy, read as A → Z on a flat type — not on whatever sort the
+      // page happened to be showing before.
+      setSortRows(cfg.sortRows ? (cfg.sortRows as SortMode) : "hierarchy");
+      setSortCols(cfg.sortCols ? (cfg.sortCols as SortMode) : "hierarchy");
       if (cfg.rowExpandedDepth !== undefined) setRowExpandedDepth(cfg.rowExpandedDepth as number);
       if (cfg.colExpandedDepth !== undefined) setColExpandedDepth(cfg.colExpandedDepth as number);
       setFilters(sanitiseFilters(cfg.filters));

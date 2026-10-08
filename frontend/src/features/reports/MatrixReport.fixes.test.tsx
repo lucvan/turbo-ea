@@ -15,6 +15,7 @@ vi.mock("@/hooks/useMetamodel", () => import("@/test/hooks").then((m) => m.useMe
 
 const saved = vi.hoisted(() => ({
   config: null as Record<string, unknown> | null,
+  loaded: null as Record<string, unknown> | null,
   persistConfig: (() => {}) as (cfg: unknown) => void,
 }));
 vi.mock("@/hooks/useSavedReport", () => ({
@@ -23,7 +24,7 @@ vi.mock("@/hooks/useSavedReport", () => ({
     savedReportName: null,
     saveDialogOpen: false,
     setSaveDialogOpen: () => {},
-    loadedConfig: null,
+    loadedConfig: saved.loaded,
     consumeConfig: () => saved.config,
     resetSavedReport: () => {},
     persistConfig: saved.persistConfig,
@@ -130,6 +131,7 @@ beforeEach(() => {
   withMetamodel([APP(true), BC(true)], [CRUD]);
   restoreRO = installResizeObserver();
   saved.config = null;
+  saved.loaded = null;
   saved.persistConfig = vi.fn();
   mockApi.on("get", "/reports/matrix*", HIER);
   mockApi.on("get", /row_type=BusinessCapability&col_type=Application/, HIER_T);
@@ -265,6 +267,66 @@ describe("MatrixReport config applied at mount", () => {
       expect(lastPersisted()).toMatchObject({ rowScopeIds: [], colScopeIds: ["app-2"] }),
     );
     expect(chip("1 column")).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A saved report opened after the page mounted
+// ---------------------------------------------------------------------------
+
+describe("MatrixReport config applied after mount", () => {
+  async function openSaved(cfg: Record<string, unknown>, view: ReturnType<typeof renderMatrix>) {
+    saved.config = cfg;
+    saved.loaded = cfg;
+    view.rerender(
+      <MemoryRouter>
+        <MatrixReport />
+      </MemoryRouter>,
+    );
+  }
+
+  it("opens each axis on its type's default sort when the config names types but no sorts", async () => {
+    const view = renderMatrix();
+    await screen.findByText("App One Child");
+    await pick(/sort rows/i, /By count/);
+    await pick(/sort columns/i, /A → Z/);
+    expect(selectValue(/sort rows/i)).toBe("By count");
+    expect(selectValue(/sort columns/i)).toBe("A → Z");
+
+    await openSaved({ rowType: "BusinessCapability", colType: "Application" }, view);
+    await waitFor(() => expect(lastPath()).toContain("row_type=BusinessCapability"));
+    await screen.findByText("Cap One Child");
+    expect(selectValue(/sort rows/i)).toBe("Hierarchy");
+    expect(selectValue(/sort columns/i)).toBe("Hierarchy");
+    await waitFor(() =>
+      expect(lastPersisted()).toMatchObject({ sortRows: "hierarchy", sortCols: "hierarchy" }),
+    );
+  });
+
+  it("reads the default as A → Z on a flat axis type", async () => {
+    withMetamodel([APP(true), BC(true), makeCardType({ key: "Provider", label: "Provider" })], [CRUD]);
+    const view = renderMatrix();
+    await screen.findByText("App One Child");
+    await pick(/sort columns/i, /By count/);
+
+    await openSaved({ rowType: "Application", colType: "Provider" }, view);
+    await waitFor(() => expect(lastPath()).toContain("col_type=Provider"));
+    await waitFor(() => expect(selectValue(/sort columns/i)).toBe("A → Z"));
+    expect(selectValue(/sort rows/i)).toBe("Hierarchy");
+  });
+
+  it("still applies the sorts the config does carry", async () => {
+    const view = renderMatrix();
+    await screen.findByText("App One Child");
+    await pick(/sort rows/i, /By count/);
+
+    await openSaved(
+      { rowType: "BusinessCapability", colType: "Application", sortRows: "alpha" },
+      view,
+    );
+    await screen.findByText("Cap One Child");
+    expect(selectValue(/sort rows/i)).toBe("A → Z");
+    expect(selectValue(/sort columns/i)).toBe("Hierarchy");
   });
 });
 

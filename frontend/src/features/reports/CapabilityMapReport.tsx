@@ -4,6 +4,7 @@ import Box from "@mui/material/Box";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import CircularProgress from "@mui/material/CircularProgress";
+import Alert from "@mui/material/Alert";
 import Typography from "@mui/material/Typography";
 import Tooltip from "@mui/material/Tooltip";
 import Chip from "@mui/material/Chip";
@@ -48,11 +49,12 @@ import {
   buildInventorySliceUrl,
   type InventorySliceFilters,
 } from "./portfolioInventoryLink";
-import { api } from "@/api/client";
+import { api, isAbortError } from "@/api/client";
 import { useAbortableEffect } from "@/hooks/useLatestRequest";
 import { readableTextColor } from "@/lib/color";
 import { CARD_TYPE_COLORS } from "@/theme";
 import { useCurrency } from "@/hooks/useCurrency";
+import { useDateFormat } from "@/hooks/useDateFormat";
 import { useMetamodel } from "@/hooks/useMetamodel";
 import { useSavedReport } from "@/hooks/useSavedReport";
 import { useThumbnailCapture } from "@/hooks/useThumbnailCapture";
@@ -738,6 +740,7 @@ function CapabilityCard({
 export default function CapabilityMapReport() {
   const { t } = useTranslation(["reports", "common"]);
   const { fmtShort } = useCurrency();
+  const { formatDate } = useDateFormat();
   const { types: metamodelTypes } = useMetamodel();
   const typeLabel = useTypeLabel();
   const relLabel = useRelationLabel();
@@ -748,6 +751,7 @@ export default function CapabilityMapReport() {
 
   // Data
   const [data, setData] = useState<CapItem[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [fieldsSchema, setFieldsSchema] = useState<SectionDef[]>([]);
   const [filterableTypes, setFilterableTypes] = useState<Record<string, FilterableTypeRef[]>>({});
   const [relationTypesData, setRelationTypesData] = useState<RelationTypeRef[]>([]);
@@ -890,14 +894,23 @@ export default function CapabilityMapReport() {
   // response land last (#882).
   useAbortableEffect(
     async ({ signal, isCurrent }) => {
-      const r = await api.get<{
+      let r: {
         items: CapItem[];
         filterable_types?: Record<string, FilterableTypeRef[]>;
         relation_types?: RelationTypeRef[];
         fields_schema?: SectionDef[];
         tag_groups?: TagGroupDef[];
-      }>(`/reports/capability-heatmap?metric=${metric}`, { signal });
+      };
+      try {
+        r = await api.get(`/reports/capability-heatmap?metric=${metric}`, { signal });
+      } catch (err) {
+        if (isAbortError(err) || !isCurrent()) return;
+        // Said on screen, not left as a spinner that never ends.
+        setLoadError(err instanceof Error ? err.message : t("common:errors.generic"));
+        return;
+      }
       if (!isCurrent()) return;
+      setLoadError(null);
       setData(r.items);
       if (r.filterable_types) setFilterableTypes(r.filterable_types);
       if (r.relation_types) setRelationTypesData(r.relation_types);
@@ -975,7 +988,7 @@ export default function CapabilityMapReport() {
           if (label) parts.push(label);
         }
         if (a.lifecycle?.endOfLife) {
-          parts.push(t("eol.endOfLifeDate", { date: a.lifecycle.endOfLife }));
+          parts.push(t("eol.endOfLifeDate", { date: formatDate(a.lifecycle.endOfLife) }));
         }
         return {
           id: a.id,
@@ -985,7 +998,7 @@ export default function CapabilityMapReport() {
           warn: !!a.lifecycle?.endOfLife,
         };
       });
-  }, [drawer, colorKey, selectFields, t]);
+  }, [drawer, colorKey, selectFields, formatDate, t]);
 
   /** Scoped capabilities as picker options, so chips label instantly. */
   const scopeOptions = useMemo<CardScopeOption[]>(() => {
@@ -1232,7 +1245,11 @@ export default function CapabilityMapReport() {
   }, [metric, displayLevel, columns, showApps, colorKey, colorByOptions, levelOptions, tl.printParam, timelineDelta, activeFilterCount, effectiveScopeIds, t]);
 
   if (data === null)
-    return (
+    return loadError ? (
+      <Box sx={{ py: 4 }}>
+        <Alert severity="error">{loadError}</Alert>
+      </Box>
+    ) : (
       <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}>
         <CircularProgress />
       </Box>
@@ -1588,6 +1605,11 @@ export default function CapabilityMapReport() {
       }
     >
       {pulsing && <style>{TIMELINE_PULSE_KEYFRAMES}</style>}
+      {loadError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {loadError}
+        </Alert>
+      )}
       {tree.length === 0 ? (
         <Box sx={{ py: 8, textAlign: "center" }}>
           <Typography color="text.secondary">

@@ -1628,8 +1628,10 @@ export default function PortfolioReport({
                 {t("portfolio.relatedTypes")}
               </MenuItem>
             )}
+            {/* Each card type, then — under it, in the order built above — one
+                option per relation type when several reach it. */}
             {groupByOptions
-              .filter((o) => o.key.startsWith("rel:"))
+              .filter((o) => o.key.startsWith("rel:") || o.key.startsWith("relt:"))
               .map((o) => (
                 <MenuItem key={o.key} value={o.key}>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>

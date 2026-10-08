@@ -257,6 +257,37 @@ describe("grouping by one relation type", () => {
   });
 });
 
+describe("Group by menu", () => {
+  const groupBySelect = () => screen.getByRole("combobox", { name: /group by/i });
+
+  it("offers each relation type reaching a card type, named by its verb", async () => {
+    render(ui());
+    await loaded();
+    fireEvent.mouseDown(groupBySelect());
+    const listbox = await screen.findByRole("listbox");
+    const options = within(listbox)
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(options).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Organization · is owned by"),
+        expect.stringContaining("Organization · is used by"),
+      ]),
+    );
+    fireEvent.click(within(listbox).getByRole("option", { name: /Organization · is used by/ }));
+    await waitFor(() => expect(groupBySelect()).toHaveTextContent("Organization · is used by"));
+    await waitFor(() => expect(lastPersisted()).toMatchObject({ groupByRaw: "relt:relOrgUsesApp" }));
+    expect(chipLabels(box("Finance HQ"))).toEqual(["1 app", "Salesforce"]);
+  });
+
+  it("shows a restored one-relation-type axis in the select", async () => {
+    state.config = { groupByRaw: "relt:relOrgOwnsApp" };
+    render(ui());
+    await loaded();
+    expect(groupBySelect()).toHaveTextContent("Organization · is owned by");
+  });
+});
+
 /* ------------------------------------------------------------------ */
 /*  AI insights at the travelled date                                  */
 /* ------------------------------------------------------------------ */

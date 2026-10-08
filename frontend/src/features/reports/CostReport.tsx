@@ -253,6 +253,23 @@ export default function CostReport() {
     [setScopeIds],
   );
 
+  const typeDef = useMemo(() => types.find((t) => t.key === cardTypeKey), [types, cardTypeKey]);
+  const costFields = useMemo(() => {
+    const raw = typeDef ? pickCostFields(typeDef.fields_schema) : [];
+    return raw.map((f) => ({ ...f, label: fieldLabel(f) }));
+  }, [typeDef, fieldLabel]);
+
+  // Auto-select cost field when card type changes — only when the current one
+  // is not on the type, so a restored field the type does carry is kept.
+  // Declared before the restore below on purpose: effects run in declaration
+  // order, so on mount this effect's pick (made from the starting type's
+  // fields) is queued first and the restored type + field overwrite it.
+  useEffect(() => {
+    if (costFields.length > 0 && !costFields.some((f) => f.key === costField)) {
+      setCostField(costFields[0].key);
+    }
+  }, [costFields]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Load saved report config
   useEffect(() => {
     const cfg = saved.consumeConfig();
@@ -304,20 +321,6 @@ export default function CostReport() {
     setDrillStack([]);
     setScopeIds([]);
   }, [saved]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const typeDef = useMemo(() => types.find((t) => t.key === cardTypeKey), [types, cardTypeKey]);
-  const costFields = useMemo(() => {
-    const raw = typeDef ? pickCostFields(typeDef.fields_schema) : [];
-    return raw.map((f) => ({ ...f, label: fieldLabel(f) }));
-  }, [typeDef, fieldLabel]);
-
-  // Auto-select cost field when card type changes — only when the current one
-  // is not on the type, so a restored field the type does carry is kept.
-  useEffect(() => {
-    if (costFields.length > 0 && !costFields.some((f) => f.key === costField)) {
-      setCostField(costFields[0].key);
-    }
-  }, [costFields]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const groupableFields = useMemo(() => {
     if (!typeDef) return [];

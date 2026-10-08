@@ -282,7 +282,7 @@ export default function LifecycleReport() {
       todayPct: ((now - tMin) / tRange) * 100,
       eolCount: eol,
     };
-  }, [scopedData]);
+  }, [scopedData, startDateKey, endDateKey]);
 
   // Year tick marks across the full range
   const totalMax = totalMin + totalRange;

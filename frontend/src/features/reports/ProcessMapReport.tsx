@@ -13,6 +13,7 @@ import Box from "@mui/material/Box";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import CircularProgress from "@mui/material/CircularProgress";
+import Alert from "@mui/material/Alert";
 import Typography from "@mui/material/Typography";
 import Tooltip from "@mui/material/Tooltip";
 import Chip from "@mui/material/Chip";
@@ -191,6 +192,17 @@ interface ProcNode extends ProcItem {
   deepDataObjects: Map<string, DataObjRef>;
 }
 
+/**
+ * A cost attribute as a number, or 0. Cost fields carry no numeric check on
+ * write, so a value can arrive as text: a numeric string counts (as the
+ * backend's `total_app_cost` reads it), anything else counts as nothing —
+ * never a string concatenated into the sum.
+ */
+function costValue(v: unknown): number {
+  const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : 0;
+}
+
 function buildTree(
   items: ProcItem[],
   orgFilter: string[],
@@ -277,7 +289,7 @@ function buildTree(
     n.deepCost = 0;
     for (const app of appMap.values()) {
       const attrs = app.attributes || {};
-      n.deepCost += ((attrs.costTotalAnnual as number) || (attrs.totalAnnualCost as number) || 0);
+      n.deepCost += costValue(attrs.costTotalAnnual) || costValue(attrs.totalAnnualCost);
     }
     return { apps: appMap, dos: doMap };
   }
@@ -577,6 +589,7 @@ export default function ProcessMapReport() {
 
   // Data
   const [data, setData] = useState<ProcItem[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [organizations, setOrganizations] = useState<RefItem[]>([]);
   const [contexts, setContexts] = useState<RefItem[]>([]);
   const [drawer, setDrawer] = useState<ProcNode | null>(null);
@@ -656,8 +669,8 @@ export default function ProcessMapReport() {
       setData(r.items);
       setOrganizations(r.organizations ?? []);
       setContexts(r.business_contexts ?? []);
-    });
-  }, []);
+    }).catch((err) => setLoadError(err instanceof Error ? err.message : t("common:errors.generic")));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- fetched once, on mount
 
   // Build full tree (with filters applied). The scope is applied to the flat
   // items *before* `buildTree`, so its `addAncestors` pass cannot climb above
@@ -838,7 +851,14 @@ export default function ProcessMapReport() {
       params.push({ label: t("processMap.businessContext"), value: ctxNames });
     }
     return params;
-  }, [metric, displayLevel, columns, showRelated, showRelatedLabel, filterOrgs, orgOptions, filterCtxs, ctxOptions, levelOptions, t]);
+  }, [metric, displayLevel, columns, effectiveScopeIds, showRelated, showRelatedLabel, filterOrgs, orgOptions, filterCtxs, ctxOptions, levelOptions, t]);
+
+  if (loadError)
+    return (
+      <Box sx={{ py: 4 }}>
+        <Alert severity="error">{loadError}</Alert>
+      </Box>
+    );
 
   if (data === null)
     return (

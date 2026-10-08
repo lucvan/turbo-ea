@@ -13,6 +13,7 @@ import { createRef } from "react";
 
 vi.mock("@/api/client", () => import("@/test/apiMock").then((m) => m.apiClientModule()));
 vi.mock("@/hooks/useMetamodel", () => import("@/test/hooks").then((m) => m.useMetamodelModule()));
+vi.mock("@/hooks/useDateFormat", () => import("@/test/hooks").then((m) => m.useDateFormatModule()));
 
 const saved = vi.hoisted(() => ({
   config: null as Record<string, unknown> | null,
@@ -439,9 +440,9 @@ describe("EolReport — timeline rows", () => {
     await screen.findByText("Today");
     const nameRow = () => screen.getByLabelText("Nginx LB (nginx 1.25)").parentElement!.parentElement as HTMLElement;
     const barRow = () =>
-      screen.getByLabelText(/^nginx 1\.25 · EOL/).parentElement!.parentElement!.parentElement as HTMLElement;
+      screen.getByLabelText(/^nginx 1\.25 · End of Life/).parentElement!.parentElement!.parentElement as HTMLElement;
     const redisBarRow = () =>
-      screen.getByLabelText(/^redis 7 · EOL/).parentElement!.parentElement!.parentElement as HTMLElement;
+      screen.getByLabelText(/^redis 7 · End of Life/).parentElement!.parentElement!.parentElement as HTMLElement;
     expect(nameRow().children).toHaveLength(1);
     expect(barRow().children).toHaveLength(1);
 
@@ -457,7 +458,7 @@ describe("EolReport — timeline rows", () => {
   it("closes the side panel it opened", async () => {
     renderReport();
     await screen.findByText("Today");
-    fireEvent.click(screen.getByLabelText(/^redis 7 · EOL/));
+    fireEvent.click(screen.getByLabelText(/^redis 7 · End of Life/));
     expect(screen.getByTestId("side-panel")).toHaveTextContent("redis");
     fireEvent.click(screen.getByRole("button", { name: "close-panel" }));
     await waitFor(() => expect(screen.queryByTestId("side-panel")).not.toBeInTheDocument());
@@ -727,10 +728,10 @@ describe("EolReport — fixes", () => {
     renderReport();
     await screen.findByText("Today");
     expect(screen.getByLabelText("Unknown Box")).toBeInTheDocument();
-    expect(screen.getByLabelText("EOL: —")).toBeInTheDocument();
+    expect(screen.getByLabelText("End of Life: —")).toBeInTheDocument();
     // A product without a cycle is named by the product alone.
     expect(screen.getByLabelText("Half Linked (kafka)")).toBeInTheDocument();
-    expect(screen.getByLabelText("kafka · EOL: —")).toBeInTheDocument();
+    expect(screen.getByLabelText("kafka · End of Life: —")).toBeInTheDocument();
     expect(screen.getByText("kafka")).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/null/);
     expect(screen.queryByLabelText(/null/)).not.toBeInTheDocument();

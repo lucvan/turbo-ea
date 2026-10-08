@@ -13,6 +13,7 @@ import { createRef } from "react";
 vi.mock("@/api/client", () => import("@/test/apiMock").then((m) => m.apiClientModule()));
 vi.mock("@/hooks/useMetamodel", () => import("@/test/hooks").then((m) => m.useMetamodelModule()));
 vi.mock("@/hooks/useCurrency", () => import("@/test/hooks").then((m) => m.useCurrencyModule()));
+vi.mock("@/hooks/useDateFormat", () => import("@/test/hooks").then((m) => m.useDateFormatModule()));
 
 const h = vi.hoisted(() => ({
   config: null as Record<string, unknown> | null,
@@ -418,5 +419,59 @@ describe("CapabilityMapReport drawer", () => {
     const panel = await screen.findByRole("presentation");
     expect(await within(panel).findByText("End of Life: 2099-01-01")).toBeInTheDocument();
     expect(within(panel).queryByText(/EOL: /)).not.toBeInTheDocument();
+  });
+
+  it("dates an app's end of life in the workspace date format", async () => {
+    hookState.dateFormat = "DD/MM/YYYY";
+    serve(
+      payload([
+        cap("billing", "Billing", null, [
+          app("a", "Alpha", { lifecycle: { active: "2015-01-01", endOfLife: "2099-03-07" } }),
+        ]),
+      ]),
+    );
+    renderMap();
+    await loaded("Billing");
+    fireEvent.click(within(chart()).getByText("Billing"));
+    const panel = await screen.findByRole("presentation");
+    expect(await within(panel).findByText("End of Life: 07/03/2099")).toBeInTheDocument();
+    expect(within(panel).queryByText(/2099-03-07/)).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Load failure
+// ---------------------------------------------------------------------------
+
+describe("CapabilityMapReport load failure", () => {
+  it("shows a failed first load instead of spinning for ever", async () => {
+    mockApi.fail("get", "/reports/capability-heatmap*", 500);
+    renderMap();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "GET /reports/capability-heatmap?metric=app_count failed",
+    );
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
+  it("shows a failed metric switch, and keeps the toolbar to switch back", async () => {
+    serve(payload([cap("billing", "Billing", null, [app("a", "Alpha")])]));
+    mockApi.fail("get", "/reports/capability-heatmap?metric=total_cost", 500);
+    renderMap();
+    await loaded("Billing");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /heatmap metric/i }));
+    fireEvent.click(within(await screen.findByRole("listbox")).getByRole("option", { name: "Total Cost" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "GET /reports/capability-heatmap?metric=total_cost failed",
+    );
+    expect(screen.getByRole("combobox", { name: /heatmap metric/i })).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /heatmap metric/i }));
+    fireEvent.click(
+      within(await screen.findByRole("listbox")).getByRole("option", { name: "Application Count" }),
+    );
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(within(chart()).getByText("Billing")).toBeInTheDocument();
   });
 });
