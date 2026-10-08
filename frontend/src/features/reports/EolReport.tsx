@@ -104,13 +104,27 @@ function parseDate(s: string | undefined | null): number | null {
   return isNaN(d.getTime()) ? null : d.getTime();
 }
 
-function fmtDate(s: string | boolean | undefined | null): string {
-  if (s === true) return "Yes (EOL)";
-  if (s === false) return "No";
+/**
+ * A cycle date, or the flag endoflife.date sends in its place. `true` means
+ * "yes" for both fields, which is not the same answer: an EOL of `true` has
+ * reached its end, a support of `true` still has support.
+ */
+function fmtDate(
+  s: string | boolean | undefined | null,
+  t: (key: string) => string,
+  trueLabel: string,
+): string {
+  if (s === true) return trueLabel;
+  if (s === false) return t("common:labels.no");
   if (!s || typeof s !== "string") return "\u2014";
   const d = toLocalDate(s);
   if (!d) return "\u2014";
   return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+}
+
+/** "product cycle", or as much of it as is known ("" for a card with no EOL link). */
+function productName(item: { eol_product: string | null; eol_cycle: string | null }): string {
+  return [item.eol_product, item.eol_cycle].filter(Boolean).join(" ");
 }
 
 function daysUntil(dateStr: string | undefined | null): number | null {
@@ -219,7 +233,10 @@ export default function EolReport() {
   const [sortK, setSortK] = useState("status");
   const [sortD, setSortD] = useState<"asc" | "desc">("asc");
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const fmtEol = (s: CycleData["eol"]) => fmtDate(s, t, t("eol.yesEol"));
+  const fmtSupport = (s: CycleData["support"]) => fmtDate(s, t, t("common:labels.yes"));
 
   // Load saved report config
   useEffect(() => {
@@ -254,8 +271,11 @@ export default function EolReport() {
   }, [saved]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    api.get<EolReportData>("/reports/eol").then(setData);
-  }, []);
+    api
+      .get<EolReportData>("/reports/eol")
+      .then(setData)
+      .catch((err) => setLoadError(err instanceof Error ? err.message : t("common:errors.generic")));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- fetched once, on mount
 
   // Filter items
   const filteredItems = useMemo(() => {
@@ -355,11 +375,18 @@ export default function EolReport() {
       const statusLabel = cfg ? t(cfg.labelKey) : filterStatus;
       params.push({ label: t("eol.status"), value: statusLabel });
     }
-    if (filterType) params.push({ label: t("common:labels.type"), value: filterType === "ITComponent" ? "IT Component" : filterType });
+    if (filterType) params.push({ label: t("common:labels.type"), value: typeLabel(getType(filterType)) || filterType });
     if (filterSource) params.push({ label: t("eol.source"), value: filterSource === "api" ? "endoflife.date" : t("eol.manual") });
     if (view === "table") params.push({ label: t("common.view"), value: t("common.table") });
     return params;
-  }, [filterStatus, filterType, filterSource, view, t]);
+  }, [filterStatus, filterType, filterSource, view, t, typeLabel, getType]);
+
+  if (loadError)
+    return (
+      <Box sx={{ py: 4 }}>
+        <Alert severity="error">{loadError}</Alert>
+      </Box>
+    );
 
   if (!data)
     return (
@@ -415,8 +442,8 @@ export default function EolReport() {
             sx={{ minWidth: 160 }}
           >
             <MenuItem value="">{t("eol.allTypes")}</MenuItem>
-            <MenuItem value="Application">Application</MenuItem>
-            <MenuItem value="ITComponent">IT Component</MenuItem>
+            <MenuItem value="Application">{typeLabel(getType("Application")) || "Application"}</MenuItem>
+            <MenuItem value="ITComponent">{typeLabel(getType("ITComponent")) || "ITComponent"}</MenuItem>
           </TextField>
           <TextField
             select
@@ -553,6 +580,7 @@ export default function EolReport() {
                   const typeConf = getType(item.type);
                   const isExpanded = expandedItem === item.id;
                   const isManual = item.source === "manual";
+                  const product = productName(item);
                   return (
                     <Box key={item.id}>
                       <Box
@@ -585,7 +613,9 @@ export default function EolReport() {
                         <Tooltip title={
                           isManual
                             ? `${item.name} (${t("eol.manuallyMaintained").toLowerCase()})`
-                            : `${item.name} (${item.eol_product} ${item.eol_cycle})`
+                            : product
+                              ? `${item.name} (${product})`
+                              : item.name
                         }>
                           <Typography
                             variant="body2"
@@ -725,10 +755,8 @@ export default function EolReport() {
 
                     const eolDays =
                       typeof cd?.eol === "string" ? daysUntil(cd.eol) : null;
-                    const productLabel = isManual
-                      ? t("eol.manual")
-                      : `${item.eol_product} ${item.eol_cycle}`;
-                    const tipText = `${productLabel} \u00B7 EOL: ${fmtDate(cd?.eol)}${eolDays !== null ? ` (${countdownLabel(eolDays)})` : ""}`;
+                    const productLabel = isManual ? t("eol.manual") : productName(item);
+                    const tipText = `${productLabel ? `${productLabel} \u00B7 ` : ""}EOL: ${fmtEol(cd?.eol)}${eolDays !== null ? ` (${countdownLabel(eolDays)})` : ""}`;
 
                     return (
                       <Box key={item.id}>
@@ -767,7 +795,7 @@ export default function EolReport() {
                             </Tooltip>
                             {/* Active support bar (release → support end) */}
                             {supportWidthPct && (
-                              <Tooltip title={t("eol.activeSupportUntil", { date: fmtDate(cd?.support) })}>
+                              <Tooltip title={t("eol.activeSupportUntil", { date: fmtSupport(cd?.support) })}>
                                 <Box
                                   className="bar"
                                   sx={{
@@ -784,7 +812,7 @@ export default function EolReport() {
                             )}
                             {/* EOL marker */}
                             {eolMs && (
-                              <Tooltip title={t("eol.endOfLifeDate", { date: fmtDate(cd?.eol) })}>
+                              <Tooltip title={t("eol.endOfLifeDate", { date: fmtEol(cd?.eol) })}>
                                 <Box
                                   sx={{
                                     position: "absolute",
@@ -845,7 +873,7 @@ export default function EolReport() {
                                 fontStyle: isManual ? "italic" : "normal",
                               }}
                             >
-                              {isManual ? "lifecycle" : `${item.eol_product} ${item.eol_cycle}`}
+                              {isManual ? "lifecycle" : productLabel}
                             </Typography>
                           </Box>
                         </Box>
@@ -1054,7 +1082,7 @@ export default function EolReport() {
                     <TableCell>
                       <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
                         <Typography variant="body2">
-                          {fmtDate(cd?.eol)}
+                          {fmtEol(cd?.eol)}
                         </Typography>
                         {eolDays !== null && (
                           <Typography
@@ -1071,7 +1099,7 @@ export default function EolReport() {
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2">
-                        {fmtDate(cd?.support)}
+                        {fmtSupport(cd?.support)}
                       </Typography>
                     </TableCell>
                     <TableCell>

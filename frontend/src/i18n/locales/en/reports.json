@@ -247,6 +247,7 @@
   "cost.topCostDriver": "Top Cost Driver",
   "cost.cost": "Cost",
   "cost.percentOfTotal": "% of Total",
+  "cost.percentOfTotalValue": "{{pct}}% of total",
   "cost.total": "Total",
   "cost.noCostData": "No cost data found.",
   "cost.unspecified": "Unspecified",

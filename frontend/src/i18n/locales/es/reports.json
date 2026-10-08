@@ -247,6 +247,7 @@
   "cost.topCostDriver": "Principal generador de costo",
   "cost.cost": "Costo",
   "cost.percentOfTotal": "% del total",
+  "cost.percentOfTotalValue": "{{pct}}% del total",
   "cost.total": "Total",
   "cost.noCostData": "No se encontraron datos de costo.",
   "cost.unspecified": "No especificado",

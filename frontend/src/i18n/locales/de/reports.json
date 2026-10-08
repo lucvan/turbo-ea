@@ -247,6 +247,7 @@
   "cost.topCostDriver": "Größter Kostentreiber",
   "cost.cost": "Kosten",
   "cost.percentOfTotal": "% vom Gesamt",
+  "cost.percentOfTotalValue": "{{pct}}% vom Gesamtbetrag",
   "cost.total": "Gesamt",
   "cost.noCostData": "Keine Kostendaten gefunden.",
   "cost.unspecified": "Nicht angegeben",

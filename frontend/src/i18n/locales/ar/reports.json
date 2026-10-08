@@ -247,6 +247,7 @@
   "cost.topCostDriver": "أعلى محرّك للتكلفة",
   "cost.cost": "التكلفة",
   "cost.percentOfTotal": "% من الإجمالي",
+  "cost.percentOfTotalValue": "{{pct}}% من الإجمالي",
   "cost.total": "الإجمالي",
   "cost.noCostData": "لم يتم العثور على بيانات تكلفة.",
   "cost.unspecified": "غير محدد",

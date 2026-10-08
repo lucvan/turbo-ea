@@ -247,6 +247,7 @@
   "cost.topCostDriver": "Største omkostningsdriver",
   "cost.cost": "Omkostninger",
   "cost.percentOfTotal": "% af total",
+  "cost.percentOfTotalValue": "{{pct}}% af total",
   "cost.total": "Total",
   "cost.noCostData": "Ingen omkostningsdata fundet.",
   "cost.unspecified": "Uspecificeret",

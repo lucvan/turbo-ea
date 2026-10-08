@@ -247,6 +247,7 @@
   "cost.topCostDriver": "Основной источник затрат",
   "cost.cost": "Стоимость",
   "cost.percentOfTotal": "% от общей суммы",
+  "cost.percentOfTotalValue": "{{pct}}% от общей суммы",
   "cost.total": "Итого",
   "cost.noCostData": "Данные о стоимости не найдены.",
   "cost.unspecified": "Не указано",

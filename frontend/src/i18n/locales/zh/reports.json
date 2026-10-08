@@ -247,6 +247,7 @@
   "cost.topCostDriver": "最大成本来源",
   "cost.cost": "成本",
   "cost.percentOfTotal": "占比",
+  "cost.percentOfTotalValue": "占总额的 {{pct}}%",
   "cost.total": "合计",
   "cost.noCostData": "未找到成本数据。",
   "cost.unspecified": "未指定",

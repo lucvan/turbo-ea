@@ -234,9 +234,17 @@ function buildTree(
   }
 
   const roots: ProcNode[] = [];
+  // Links made so far, child id → parent node. A parent chain that loops back
+  // on itself has no root, so every process on it would vanish: the link that
+  // would close the loop is left out, and that process stands as the root.
+  const linkedTo = new Map<string, ProcNode>();
   for (const node of nodeMap.values()) {
-    if (node.parent_id && nodeMap.has(node.parent_id)) {
-      nodeMap.get(node.parent_id)!.children.push(node);
+    const parent = node.parent_id ? nodeMap.get(node.parent_id) : undefined;
+    let up = parent;
+    while (up && up !== node) up = linkedTo.get(up.id);
+    if (parent && up !== node) {
+      parent.children.push(node);
+      linkedTo.set(node.id, parent);
     } else {
       roots.push(node);
     }
@@ -678,17 +686,21 @@ export default function ProcessMapReport() {
   // Scoping into a shallow branch re-ranges the Display Depth options, which
   // can strand the current value outside them — a MUI Select with no matching
   // MenuItem renders blank and warns. `99` ("all levels") is a sentinel.
+  // A stored depth below the first level matches no option either.
   useEffect(() => {
-    if (displayLevel !== 99 && maxLvl > 0 && displayLevel > maxLvl) setDisplayLevel(maxLvl);
+    if (displayLevel === 99) return;
+    if (displayLevel < 1) setDisplayLevel(1);
+    else if (maxLvl > 0 && displayLevel > maxLvl) setDisplayLevel(maxLvl);
   }, [maxLvl, displayLevel]);
 
-  // A zoom target outside a newly-set scope is no longer in the tree. The
-  // derivation below already falls back to the whole (scoped) tree, so nothing
-  // breaks — but the stale id would linger in state with no breadcrumb to
-  // clear it from.
+  // A zoom target outside a newly-set scope, or hidden by an Organization /
+  // Business Context filter, is no longer in the tree. The derivation above
+  // already falls back to the whole (scoped) tree, so nothing breaks — but the
+  // stale id would linger in state with no breadcrumb to clear it from, and
+  // clearing the filter would silently zoom back in.
   useEffect(() => {
-    if (zoomNodeId && scope.closure && !scope.closure.has(zoomNodeId)) setZoomNodeId(null);
-  }, [zoomNodeId, scope.closure]);
+    if (zoomNodeId && !findNode(fullTree, zoomNodeId)) setZoomNodeId(null);
+  }, [zoomNodeId, fullTree]);
 
   // Compute max metric value across visible tree
   const maxVal = useMemo(() => {

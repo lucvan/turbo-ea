@@ -305,7 +305,9 @@ describe("EolReport table", () => {
     expect(within(nginx).getByLabelText("Shop, Portal")).toHaveTextContent("2 apps");
 
     const pg = screen.getByRole("row", { name: /^Postgres/ });
-    expect(within(pg).getByText("Yes (EOL)")).toBeInTheDocument();
+    // Support `true` still has support: a plain yes, not an end of life.
+    expect(within(pg).getByText("Yes")).toBeInTheDocument();
+    expect(within(pg).queryByText("Yes (EOL)")).not.toBeInTheDocument();
     expect(within(pg).getByText("(2mo)")).toBeInTheDocument();
     expect(within(pg).getByText("1 app")).toBeInTheDocument();
     expect(within(screen.getByRole("row", { name: /^Redis/ })).getByText("No")).toBeInTheDocument();

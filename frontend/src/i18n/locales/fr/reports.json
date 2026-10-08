@@ -247,6 +247,7 @@
   "cost.topCostDriver": "Principal poste de coût",
   "cost.cost": "Coût",
   "cost.percentOfTotal": "% du total",
+  "cost.percentOfTotalValue": "{{pct}} % du total",
   "cost.total": "Total",
   "cost.noCostData": "Aucune donnée de coût trouvée.",
   "cost.unspecified": "Non spécifié",
