@@ -19,7 +19,7 @@ import NewArtefactSplitButton, {
 } from "@/features/ea-delivery/initiatives/NewArtefactSplitButton";
 import { UNLINKED_KEY } from "@/features/ea-delivery/initiatives/InitiativeTreeSidebar";
 import CreateDiagramDialog from "@/features/diagrams/CreateDiagramDialog";
-import type { DiagramSummary, SoAW } from "@/types";
+import type { Card, DiagramSummary, SoAW } from "@/types";
 import type { useInitiativeData } from "@/features/ea-delivery/initiatives";
 
 /**
@@ -78,10 +78,16 @@ export default function EaDeliveryReport() {
 
   // ── Data from InitiativesTab (exposed via callback) ─────────────────────
   const dataRef = useRef<ReturnType<typeof useInitiativeData> | null>(null);
+  // What the dialogs render from lives in state, not only in the ref, so a
+  // refresh of the workspace data reaches a dialog that is already open.
+  const [initiatives, setInitiatives] = useState<Card[]>([]);
+  const [diagrams, setDiagrams] = useState<DiagramSummary[]>([]);
 
   const handleDataReady = useCallback(
     (d: ReturnType<typeof useInitiativeData>) => {
       dataRef.current = d;
+      setInitiatives(d.initiatives);
+      setDiagrams(d.diagrams);
     },
     [],
   );
@@ -314,7 +320,7 @@ export default function EaDeliveryReport() {
           navigate(`/ea-delivery/soaw/${created.id}`);
         }}
         fixedInitiativeId={soawCreateInitiativeId || undefined}
-        initiatives={dataRef.current?.initiatives ?? []}
+        initiatives={initiatives}
       />
 
       {/* ADR create dialog */}
@@ -340,8 +346,8 @@ export default function EaDeliveryReport() {
       <LinkDiagramsDialog
         open={linkOpen}
         onClose={() => setLinkOpen(false)}
-        diagrams={dataRef.current?.diagrams ?? []}
-        initiatives={dataRef.current?.initiatives ?? []}
+        diagrams={diagrams}
+        initiatives={initiatives}
         linkInitiativeId={linkInitiativeId}
         linkSelected={linkSelected}
         linking={linking}

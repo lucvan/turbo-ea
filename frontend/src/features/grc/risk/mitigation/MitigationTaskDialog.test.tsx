@@ -416,5 +416,18 @@ describe("MitigationTaskDialog — seeding", () => {
     // Still fading out: the content must not blank under the user's eyes.
     expect(screen.getByDisplayValue("Review access rights")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Quarterly IAM review")).toBeInTheDocument();
+    // …nor flip to the create wording for the moment it is still visible.
+    expect(screen.getByText("Edit mitigation task")).toBeInTheDocument();
+    expect(screen.queryByText("New mitigation task")).not.toBeInTheDocument();
+    expect(screen.getByText("Save changes")).toBeInTheDocument();
+    expect(screen.queryByText("Create task")).not.toBeInTheDocument();
+  });
+
+  it("keeps the create wording while a create dialog closes", () => {
+    const props = { users: USER_OPTIONS, onClose: vi.fn(), onSubmit: vi.fn(async () => {}) };
+    const view = render(<MitigationTaskDialog {...props} open task={null} />);
+    view.rerender(<MitigationTaskDialog {...props} open={false} task={null} />);
+    expect(screen.getByText("New mitigation task")).toBeInTheDocument();
+    expect(screen.getByText("Create task")).toBeInTheDocument();
   });
 });

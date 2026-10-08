@@ -290,3 +290,103 @@ describe("CreateAdrDialog", () => {
     expect(screen.getByLabelText("Decision title")).toHaveValue("Half typed");
   });
 });
+
+describe("CreateAdrDialog — a link fails after the decision was created", () => {
+  /** Linking card-1 fails `times` times, then succeeds; every other link succeeds. */
+  function failLinkOf(cardId: string, times: number) {
+    let left = times;
+    mockApi.on("post", "/adr/adr-9/cards", (_path, body) => {
+      if ((body as { card_id: string }).card_id === cardId && left > 0) {
+        left -= 1;
+        throw new Error("link refused");
+      }
+      return { ok: true };
+    });
+  }
+
+  async function createWithTwoCards() {
+    const user = userEvent.setup();
+    const handlers = renderDialog({ preLinkedCards: [INITIATIVE] });
+    await user.type(screen.getByLabelText("Decision title"), "Adopt event bus");
+    await user.click(screen.getByRole("button", { name: /Add Card$/ }));
+    await user.click(screen.getByTestId("card-picker"));
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    return { user, ...handlers };
+  }
+
+  const linkCalls = () =>
+    mockApi.callsOf("post", "/adr/adr-9/cards").map((c) => (c.body as { card_id: string }).card_id);
+
+  it("says the decision exists and names the card it could not link, and stays open", async () => {
+    failLinkOf("init-1", 1);
+    const { onCreated, onClose } = await createWithTwoCards();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "The decision was created, but these cards could not be linked: Cloud Migration.",
+    );
+    expect(alert).not.toHaveTextContent("Failed to create architecture decision");
+    // One failure does not stop the rest of the links.
+    expect(linkCalls()).toEqual(["init-1", "card-1"]);
+    expect(onCreated).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    // The title belongs to a decision that now exists: it can no longer be edited here.
+    expect(screen.getByLabelText("Decision title")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create" })).toBeEnabled();
+  });
+
+  it("retries only the missing link, never a second decision, then finishes", async () => {
+    failLinkOf("card-1", 1);
+    const { user, onCreated, onClose } = await createWithTwoCards();
+    expect(await screen.findByRole("alert")).toHaveTextContent("NexaCore ERP");
+
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+    expect(mockApi.callsOf("post", "/adr")).toHaveLength(1);
+    expect(linkCalls()).toEqual(["init-1", "card-1", "card-1"]);
+    expect(onCreated.mock.calls[0][0]).toMatchObject({ id: "adr-9" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("finishes without the failed card once it is removed", async () => {
+    failLinkOf("card-1", 5);
+    const { user, onCreated } = await createWithTwoCards();
+    await screen.findByRole("alert");
+
+    // A card already linked to the decision cannot be removed from it here.
+    const linked = screen.getByText("Cloud Migration").closest(".MuiChip-root") as HTMLElement;
+    expect(within(linked).queryByTestId("CancelIcon")).not.toBeInTheDocument();
+
+    const failed = screen.getByText("NexaCore ERP").closest(".MuiChip-root") as HTMLElement;
+    await user.click(within(failed).getByTestId("CancelIcon"));
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+    expect(mockApi.callsOf("post", "/adr")).toHaveLength(1);
+    expect(linkCalls()).toEqual(["init-1", "card-1"]);
+  });
+
+  it("starts a fresh decision when it is reopened", async () => {
+    failLinkOf("card-1", 1);
+    const user = userEvent.setup();
+    const props = { onClose: vi.fn(), onCreated: vi.fn() };
+    const { rerender } = render(<CreateAdrDialog open {...props} />);
+    await user.type(screen.getByLabelText("Decision title"), "First");
+    await user.click(screen.getByRole("button", { name: /Add Card$/ }));
+    await user.click(screen.getByTestId("card-picker"));
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    await screen.findByRole("alert");
+
+    rerender(<CreateAdrDialog open={false} {...props} />);
+    rerender(<CreateAdrDialog open {...props} />);
+    expect(screen.getByLabelText("Decision title")).toBeEnabled();
+    await user.type(screen.getByLabelText("Decision title"), "Second");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(props.onCreated).toHaveBeenCalledTimes(1));
+    expect(mockApi.callsOf("post", "/adr").map((c) => c.body)).toEqual([
+      { title: "First" },
+      { title: "Second" },
+    ]);
+  });
+});

@@ -223,6 +223,7 @@ function TreeBranch({
   favorites,
   onToggleFavorite,
 }: BranchProps) {
+  const { t } = useTranslation(["delivery", "common"]);
   // Default: parents are open; collapses are user-driven, in-memory.
   const [open, setOpen] = useState(true);
   const hasChildren = node.children.length > 0;
@@ -234,6 +235,14 @@ function TreeBranch({
   const isFavorite = favorites.has(initiative.id);
   const totalArtefacts =
     node.soaws.length + node.diagrams.length + node.adrs.length;
+  // Same vocabulary as the workspace header's status chip.
+  const statusLabels: Record<string, string> = {
+    onTrack: t("initiativeStatus.onTrack"),
+    atRisk: t("initiativeStatus.atRisk"),
+    offTrack: t("initiativeStatus.offTrack"),
+    onHold: t("initiativeStatus.onHold"),
+    completed: t("initiativeStatus.completed"),
+  };
 
   return (
     <>
@@ -255,6 +264,7 @@ function TreeBranch({
             : "3px solid transparent",
           "&:hover": { bgcolor: isSelected ? "action.selected" : "action.hover" },
         }}
+        aria-current={isSelected ? "true" : undefined}
         onClick={() => onSelect(initiative.id)}
       >
         {/* Tree guide lines for nested levels */}
@@ -320,7 +330,7 @@ function TreeBranch({
           />
         )}
         {initStatus && (
-          <Tooltip title={initStatus} placement="top">
+          <Tooltip title={statusLabels[initStatus] ?? initStatus} placement="top">
             <Box
               sx={{
                 width: 8,
@@ -386,6 +396,7 @@ function UnlinkedRow({
   return (
     <Box
       onClick={onSelect}
+      aria-current={selected ? "true" : undefined}
       sx={{
         display: "flex",
         alignItems: "center",

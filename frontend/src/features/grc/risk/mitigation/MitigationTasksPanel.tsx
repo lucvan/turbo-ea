@@ -24,7 +24,7 @@ import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import LinkifiedText from "@/components/LinkifiedText";
 import MaterialSymbol from "@/components/MaterialSymbol";
-import { api, ApiError } from "@/api/client";
+import { api } from "@/api/client";
 import { useDateFormat } from "@/hooks/useDateFormat";
 import type { MitigationTask, MitigationTaskOccurrence } from "@/types";
 import CompleteOccurrenceDialog, {
@@ -131,6 +131,9 @@ export default function MitigationTasksPanel({
   const [tasks, setTasks] = useState<MitigationTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // A failed load is not an empty list: the empty state stays hidden until a
+  // load succeeds, even after the error alert is dismissed.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const [editorOpen, setEditorOpen] = useState(false);
@@ -141,6 +144,12 @@ export default function MitigationTasksPanel({
   const [completeTask, setCompleteTask] = useState<MitigationTask | null>(null);
   const [completeOcc, setCompleteOcc] = useState<MitigationTaskOccurrence | null>(null);
 
+  // Any failure is shown — a dropped connection is a TypeError, not an ApiError.
+  const showError = useCallback(
+    (e: unknown) => setError(e instanceof Error ? e.message : t("common:errors.generic")),
+    [t],
+  );
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -149,13 +158,15 @@ export default function MitigationTasksPanel({
         `/risks/${riskId}/mitigation-tasks`,
       );
       setTasks(items);
+      setLoadFailed(false);
       onSummaryChange?.(deriveSummary(items));
     } catch (e) {
-      if (e instanceof ApiError) setError(e.message);
+      setLoadFailed(true);
+      showError(e);
     } finally {
       setLoading(false);
     }
-  }, [riskId, onSummaryChange]);
+  }, [riskId, onSummaryChange, showError]);
 
   useEffect(() => {
     refresh();
@@ -166,7 +177,7 @@ export default function MitigationTasksPanel({
       await api.post(`/risks/${riskId}/mitigation-tasks`, payload);
       await refresh();
     } catch (e) {
-      if (e instanceof ApiError) setError(e.message);
+      showError(e);
     }
   };
 
@@ -178,7 +189,7 @@ export default function MitigationTasksPanel({
       await api.patch(`/mitigation-tasks/${task.id}`, payload);
       await refresh();
     } catch (e) {
-      if (e instanceof ApiError) setError(e.message);
+      showError(e);
     }
   };
 
@@ -190,7 +201,7 @@ export default function MitigationTasksPanel({
       await api.delete(`/mitigation-tasks/${task.id}`);
       await refresh();
     } catch (e) {
-      if (e instanceof ApiError) setError(e.message);
+      showError(e);
     }
   };
 
@@ -204,7 +215,7 @@ export default function MitigationTasksPanel({
       );
       await refresh();
     } catch (e) {
-      if (e instanceof ApiError) setError(e.message);
+      showError(e);
     }
   };
 
@@ -219,7 +230,7 @@ export default function MitigationTasksPanel({
       );
       await refresh();
     } catch (e) {
-      if (e instanceof ApiError) setError(e.message);
+      showError(e);
     }
   };
 
@@ -262,9 +273,11 @@ export default function MitigationTasksPanel({
           {t("risks.tasks.loading")}
         </Typography>
       ) : tasks.length === 0 ? (
-        <Typography variant="body2" color="text.secondary">
-          {t("risks.tasks.empty")}
-        </Typography>
+        !loadFailed && (
+          <Typography variant="body2" color="text.secondary">
+            {t("risks.tasks.empty")}
+          </Typography>
+        )
       ) : (
         <Stack spacing={1.5}>
           {tasks.map((task) => {

@@ -75,6 +75,11 @@ export default function MitigationTaskDialog({
   // unit/interval; once they touch it explicitly, we stop overwriting.
   const [leadTimeDirty, setLeadTimeDirty] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // The parent clears `task` in the same render that closes the dialog, so
+  // the title and the submit label follow the task the dialog was last open
+  // for — otherwise they flip to the create wording while it fades out.
+  const [shownTask, setShownTask] = useState(task);
+  if (open && shownTask !== task) setShownTask(task);
 
   // Sync local form state when the dialog opens for a different task.
   useEffect(() => {
@@ -164,7 +169,7 @@ export default function MitigationTaskDialog({
       disableRestoreFocus
     >
       <DialogTitle>
-        {task ? t("risks.tasks.dialog.editTitle") : t("risks.tasks.dialog.createTitle")}
+        {shownTask ? t("risks.tasks.dialog.editTitle") : t("risks.tasks.dialog.createTitle")}
       </DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
@@ -279,7 +284,7 @@ export default function MitigationTaskDialog({
           onClick={handleSubmit}
           disabled={!canSubmit || submitting}
         >
-          {task ? t("risks.tasks.dialog.save") : t("risks.tasks.dialog.create")}
+          {shownTask ? t("risks.tasks.dialog.save") : t("risks.tasks.dialog.create")}
         </Button>
       </DialogActions>
     </Dialog>

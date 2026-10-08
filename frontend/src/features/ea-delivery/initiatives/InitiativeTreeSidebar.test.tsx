@@ -112,9 +112,28 @@ describe("InitiativeTreeSidebar", () => {
     expect(screen.getByText("3 initiatives")).toBeInTheDocument();
     expect(screen.queryByText("No initiatives match the current filters.")).not.toBeInTheDocument();
     expect(screen.queryByText("Unlinked artefacts")).not.toBeInTheDocument();
-    // The status dot names the raw status in its tooltip; it is not printed as text.
-    expect(screen.getByLabelText("atRisk")).toBeInTheDocument();
-    expect(screen.queryByText("atRisk")).not.toBeInTheDocument();
+    // The status dot names the translated status in its tooltip; it is not printed as text.
+    expect(screen.getByLabelText("At Risk")).toBeInTheDocument();
+    expect(screen.queryByLabelText("atRisk")).not.toBeInTheDocument();
+    expect(screen.queryByText("At Risk")).not.toBeInTheDocument();
+    // A status the vocabulary does not know is named as stored.
+    expect(screen.getByLabelText("unknownState")).toBeInTheDocument();
+  });
+
+  it("marks the selected initiative as current, and only that one", () => {
+    renderSidebar({ selectedId: "init-2", unlinkedCount: 1 });
+    const rowOf = (name: string) => screen.getByText(name).parentElement as HTMLElement;
+    expect(rowOf("Lift and shift")).toHaveAttribute("aria-current", "true");
+    expect(rowOf("Cloud Migration")).not.toHaveAttribute("aria-current");
+    expect(rowOf("Old programme")).not.toHaveAttribute("aria-current");
+    expect(rowOf("Unlinked artefacts")).not.toHaveAttribute("aria-current");
+  });
+
+  it("marks the Unlinked row as current when it is selected", () => {
+    renderSidebar({ selectedId: UNLINKED_KEY, unlinkedCount: 2 });
+    const rowOf = (name: string) => screen.getByText(name).parentElement as HTMLElement;
+    expect(rowOf("Unlinked artefacts")).toHaveAttribute("aria-current", "true");
+    expect(rowOf("Cloud Migration")).not.toHaveAttribute("aria-current");
   });
 
   it("selects on row click, toggles a favourite without selecting, and collapses a branch", async () => {
