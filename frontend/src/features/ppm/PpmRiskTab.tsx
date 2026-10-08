@@ -264,7 +264,7 @@ export default function PpmRiskTab({ initiativeId, risks, onRefresh }: Props) {
                     size="small"
                     sx={{
                       bgcolor: scoreColor(risk.risk_score),
-                      color: "#fff",
+                      color: "common.white",
                       fontWeight: 700,
                       minWidth: 32,
                     }}

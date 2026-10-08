@@ -223,13 +223,17 @@ export default function PrinciplesCataloguePage() {
             </Button>
           </Stack>
         </Stack>
-        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
-          {t("principlesCatalogue.matchCount", {
-            shown: filtered.length,
-            total: payload?.principles.length ?? 0,
-            importable: totalImportable,
-          })}
-        </Typography>
+        {/* No catalogue yet (loading, or the load failed): no count to give —
+            "0 of 0" would read as an empty catalogue. */}
+        {payload && (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
+            {t("principlesCatalogue.matchCount", {
+              shown: filtered.length,
+              total: payload.principles.length,
+              importable: totalImportable,
+            })}
+          </Typography>
+        )}
       </Paper>
 
       {loading && (

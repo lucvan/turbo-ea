@@ -94,7 +94,8 @@ describe("PrinciplesCataloguePage — browsing", () => {
     expect(html).toContain("Principles Catalogue");
     expect(html).toContain("Curated reference set of industry-standard EA principles.");
     expect(html).toContain('role="progressbar"');
-    expect(html).toContain("Showing 0 of 0 — 0 not yet imported");
+    // No catalogue yet: no count to give, and never "0 of 0".
+    expect(html).not.toMatch(/Showing \d+ of \d+/);
     expect(html).not.toContain(NO_MATCHES);
   });
 
@@ -224,10 +225,13 @@ describe("PrinciplesCataloguePage — browsing", () => {
     // A catalogue that never arrived is not one where nothing matches.
     expect(screen.queryByText(NO_MATCHES)).not.toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    // Nor as an empty catalogue: there is no count to give.
+    expect(screen.queryByText(/^Showing \d+ of \d+/)).not.toBeInTheDocument();
     await user.click(within(alert).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
     // Dismissing the error does not turn the failure into "no matches".
     expect(screen.queryByText(NO_MATCHES)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Showing \d+ of \d+/)).not.toBeInTheDocument();
   });
 
   it("still says nothing matches a search after a failed reload, over the list it kept", async () => {

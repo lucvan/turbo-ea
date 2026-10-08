@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, lazy, Suspense } from "react";
+import { useState, useMemo, useRef, useEffect, lazy, Suspense } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Paper from "@mui/material/Paper";
@@ -60,12 +60,27 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
     err instanceof Error ? err.message : t("common:errors.generic");
 
   // ── Budget lines (planned) ──
+  // The query keeps its lines while it reloads them after a save, but another
+  // initiative's lines must never stand in for this one's while a switch
+  // loads. So each payload is tagged with the initiative it was requested
+  // for. The tag is set by an effect declared before the query's own, so it
+  // moves exactly when the next request goes out: a response for the last
+  // initiative that lands in between keeps the last initiative's tag.
+  const requestedForRef = useRef(initiativeId);
+  useEffect(() => {
+    requestedForRef.current = initiativeId;
+  }, [initiativeId]);
   const {
-    data: loadedBudgetLines,
+    data: taggedBudgetLines,
     loading: budgetLoading,
     error: budgetLoadError,
     refetch: loadBudgets,
-  } = useApiQuery<PpmBudgetLine[]>(`/ppm/initiatives/${initiativeId}/budgets`);
+  } = useApiQuery<PpmBudgetLine[], { initiativeId: string; lines: PpmBudgetLine[] }>(
+    `/ppm/initiatives/${initiativeId}/budgets`,
+    { select: (lines) => ({ initiativeId: requestedForRef.current, lines }) },
+  );
+  const loadedBudgetLines =
+    taggedBudgetLines?.initiativeId === initiativeId ? taggedBudgetLines.lines : undefined;
   const budgetLines = loadedBudgetLines ?? NO_BUDGET_LINES;
   // Until the budget lines have arrived, a budget figure is unknown — never $0.
   const budgetKnown = loadedBudgetLines !== undefined;
@@ -311,10 +326,13 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
         </Box>
       </Paper>
 
-      {/* Cumulative spend charts */}
-      <Suspense fallback={null}>
-        <PpmCostCharts costLines={costLines} budgetLines={budgetLines} />
-      </Suspense>
+      {/* Cumulative spend charts. Not before the budget lines are known: a
+          chart without them would read as an initiative with no budget. */}
+      {budgetKnown && (
+        <Suspense fallback={null}>
+          <PpmCostCharts costLines={costLines} budgetLines={budgetLines} />
+        </Suspense>
+      )}
 
       {/* ── Planned Budget ── */}
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>

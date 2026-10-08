@@ -157,11 +157,8 @@ describe("PpmCostTab — summary and tables", () => {
 
   it("hands both line sets to the charts", async () => {
     renderTab();
-    // The cost lines arrive as props and render at once; the budget lines come
-    // from their own GET. Wait for the second render, not the first.
-    await waitFor(() =>
-      expect(screen.getByTestId("cost-charts")).toHaveTextContent("2 costs / 2 budgets"),
-    );
+    // The charts wait for the budget lines: their first render already has both.
+    expect(await screen.findByTestId("cost-charts")).toHaveTextContent("2 costs / 2 budgets");
   });
 
   it("shows both empty states", async () => {
@@ -410,10 +407,45 @@ describe("PpmCostTab — following its props", () => {
     const { rerender } = render(<PpmCostTab initiativeId="i1" costLines={[]} onRefresh={vi.fn()} />);
     await screen.findByText("FY 2025");
     rerender(<PpmCostTab initiativeId="i2" costLines={[]} onRefresh={vi.fn()} />);
+    // The first initiative's lines go the moment it is left, not once the next arrive.
+    expect(screen.queryByText("FY 2025")).not.toBeInTheDocument();
     expect(await screen.findByText("FY 2030")).toBeInTheDocument();
     expect(mockApi.callsOf("get", "/ppm/initiatives/i2/budgets")).toHaveLength(1);
-    await waitFor(() => expect(screen.queryByText("FY 2025")).not.toBeInTheDocument());
+    expect(screen.queryByText("FY 2025")).not.toBeInTheDocument();
     expect(kpi("Total Budget")).toBe("$50");
+  });
+
+  it("shows the next initiative's budget loading, never the last one's lines, while it switches", async () => {
+    const next = deferred<PpmBudgetLine[]>();
+    mockApi.on("get", "/ppm/initiatives/i2/budgets", () => next.promise);
+    const { rerender } = render(<PpmCostTab initiativeId="i1" costLines={COSTS} onRefresh={vi.fn()} />);
+    expect(await screen.findByTestId("cost-charts")).toHaveTextContent("2 costs / 2 budgets");
+    rerender(<PpmCostTab initiativeId="i2" costLines={COSTS} onRefresh={vi.fn()} />);
+    await waitFor(() => expect(mockApi.callsOf("get", "/ppm/initiatives/i2/budgets")).toHaveLength(1));
+
+    expect(screen.queryByText("FY 2025")).not.toBeInTheDocument();
+    expect(screen.queryByText("No budget lines yet")).not.toBeInTheDocument();
+    const budgetTable = screen.getByRole("columnheader", { name: "Fiscal Year" }).closest("table") as HTMLElement;
+    expect(within(budgetTable).getByRole("progressbar")).toBeInTheDocument();
+    expect(kpi("Total Budget")).toBe("—");
+    expect(kpi("CapEx")).toBe("$250 / —");
+    // Nor a chart drawn against no budget.
+    expect(screen.queryByTestId("cost-charts")).not.toBeInTheDocument();
+
+    next.resolve([budget({ id: "b9", initiative_id: "i2", fiscal_year: 2030, amount: 50 })]);
+    expect(await screen.findByText("FY 2030")).toBeInTheDocument();
+    expect(kpi("Total Budget")).toBe("$50");
+    expect(await screen.findByTestId("cost-charts")).toHaveTextContent("2 costs / 1 budgets");
+  });
+
+  it("shows a failed load for the next initiative, not the last one's lines", async () => {
+    mockApi.fail("get", "/ppm/initiatives/i2/budgets", 500);
+    const { rerender } = render(<PpmCostTab initiativeId="i1" costLines={[]} onRefresh={vi.fn()} />);
+    await screen.findByText("FY 2025");
+    rerender(<PpmCostTab initiativeId="i2" costLines={[]} onRefresh={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("GET /ppm/initiatives/i2/budgets failed");
+    expect(screen.queryByText("FY 2025")).not.toBeInTheDocument();
+    expect(kpi("Total Budget")).toBe("—");
   });
 
   it("re-totals the actuals when the parent hands it new cost lines", async () => {
@@ -575,6 +607,35 @@ describe("PpmCostTab — loading the budget lines", () => {
     // Nor as a $0 budget, nor as still loading.
     expect(kpi("Total Budget")).toBe("—");
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
+  /** Resolve the lazy charts chunk, so a missing chart means "not drawn", not "chunk still loading". */
+  async function warmCharts() {
+    const { unmount } = render(<PpmCostTab initiativeId="i1" costLines={COSTS} onRefresh={vi.fn()} />);
+    await screen.findByTestId("cost-charts");
+    unmount();
+  }
+
+  it("draws no spend charts until the budget lines have arrived", async () => {
+    await warmCharts();
+    const pending = deferred<PpmBudgetLine[]>();
+    mockApi.on("get", budgetPath, () => pending.promise);
+    renderTab();
+    await settle();
+    expect(kpi("Total Budget")).toBe("—");
+    // A chart without its budget lines would read as an initiative with no budget.
+    expect(screen.queryByTestId("cost-charts")).not.toBeInTheDocument();
+
+    pending.resolve(BUDGETS);
+    expect(await screen.findByTestId("cost-charts")).toHaveTextContent("2 costs / 2 budgets");
+  });
+
+  it("draws no spend charts over a budget that failed to load", async () => {
+    await warmCharts();
+    mockApi.fail("get", budgetPath, 500);
+    renderTab();
+    expect(await screen.findByRole("alert")).toHaveTextContent(`GET ${budgetPath} failed`);
+    expect(screen.queryByTestId("cost-charts")).not.toBeInTheDocument();
   });
 
   it("ignores a budget response for an initiative it has since left", async () => {

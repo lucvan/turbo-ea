@@ -106,6 +106,10 @@ describe("PpmRiskTab — summary and table", () => {
     expect(chipOf("Vendor lock-in", "20")).toHaveStyle({ backgroundColor: RAG_COLORS.red });
     expect(chipOf("Budget overrun", "9")).toHaveStyle({ backgroundColor: RAG_COLORS.amber });
     expect(chipOf("Late delivery", "2")).toHaveStyle({ backgroundColor: RAG_COLORS.green });
+    // White text on every band (palette.common.white).
+    for (const [title, score] of [["Vendor lock-in", "20"], ["Budget overrun", "9"], ["Late delivery", "2"]]) {
+      expect(chipOf(title, score)).toHaveStyle({ color: "rgb(255, 255, 255)" });
+    }
   });
 
   it("truncates a long description and shows dashes for a missing owner or mitigation", () => {

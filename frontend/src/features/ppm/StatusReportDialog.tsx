@@ -67,7 +67,7 @@ function HealthToggle({
               lineHeight: 1.2,
               "&.Mui-selected": {
                 bgcolor: HEALTH_FILL[v],
-                color: "#fff",
+                color: "common.white",
                 "&:hover": { bgcolor: HEALTH_FILL[v] },
               },
             }}
