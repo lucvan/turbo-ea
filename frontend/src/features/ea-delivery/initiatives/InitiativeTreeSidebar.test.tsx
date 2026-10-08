@@ -401,3 +401,51 @@ describe("InitiativeTreeSidebar — status labels come from the metamodel", () =
     }
   });
 });
+
+describe("InitiativeTreeSidebar — the status dot is coloured from the metamodel", () => {
+  const COLOURED_TYPE = makeCardType({
+    ...INITIATIVE_TYPE,
+    fields_schema: [
+      makeSection({
+        section: "Initiative Information",
+        fields: [
+          makeField({
+            key: "initiativeStatus",
+            type: "single_select",
+            options: [
+              makeOption({ key: "atRisk", label: "Needs attention", color: "#c2185b" }),
+              makeOption({ key: "paused", label: "Paused by board", color: "#6a1b9a" }),
+              makeOption({ key: "draft", label: "Draft" }),
+              makeOption({ key: "offTrack", label: "Off course" }),
+            ],
+          }),
+        ],
+      }),
+    ],
+  });
+  const withStatus = (id: string, status: string) =>
+    node(makeCard({ id, type: "Initiative", name: `Initiative ${id}`, attributes: { initiativeStatus: status } }));
+
+  it("takes the dot's colour from the option, falling back to the bundled colour, then grey", () => {
+    withMetamodel([COLOURED_TYPE]);
+    renderSidebar({
+      tree: [
+        withStatus("a", "paused"),
+        withStatus("b", "atRisk"),
+        withStatus("c", "offTrack"),
+        withStatus("d", "draft"),
+        withStatus("e", "completed"),
+      ],
+      totalCount: 5,
+    });
+    // A custom option's own colour, never grey.
+    expect(screen.getByLabelText("Paused by board")).toHaveStyle({ backgroundColor: "#6a1b9a" });
+    // The admin's colour for a built-in status wins over the bundled one.
+    expect(screen.getByLabelText("Needs attention")).toHaveStyle({ backgroundColor: "#c2185b" });
+    // A built-in status keeps the bundled colour when its option has none, or is missing.
+    expect(screen.getByLabelText("Off course")).toHaveStyle({ backgroundColor: "#d32f2f" });
+    expect(screen.getByLabelText("Completed")).toHaveStyle({ backgroundColor: "#1976d2" });
+    // A custom option without a colour is grey.
+    expect(screen.getByLabelText("Draft")).toHaveStyle({ backgroundColor: "#9e9e9e" });
+  });
+});

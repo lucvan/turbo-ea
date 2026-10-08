@@ -172,9 +172,9 @@ export default function MitigationTasksPanel({
     refresh();
   }, [refresh]);
 
-  // Create and edit let a failed write reach the dialog, which shows it and
-  // stays open so the user's input is not lost. `refresh` reports its own
-  // failure on the panel, so it never rejects into the dialog.
+  // Create, edit, complete and skip let a failed write reach their dialog,
+  // which shows it and stays open so the user's input is not lost. `refresh`
+  // reports its own failure on the panel, so it never rejects into a dialog.
   const handleCreate = async (payload: MitigationTaskDialogPayload) => {
     await api.post(`/risks/${riskId}/mitigation-tasks`, payload);
     await refresh();
@@ -203,15 +203,11 @@ export default function MitigationTasksPanel({
   const handleTerminate = async (notes: string | null) => {
     if (!completeTask || !completeOcc) return;
     const verb = completeMode === "complete" ? "complete" : "skip";
-    try {
-      await api.post(
-        `/mitigation-tasks/${completeTask.id}/occurrences/${completeOcc.id}/${verb}`,
-        { notes },
-      );
-      await refresh();
-    } catch (e) {
-      showError(e);
-    }
+    await api.post(
+      `/mitigation-tasks/${completeTask.id}/occurrences/${completeOcc.id}/${verb}`,
+      { notes },
+    );
+    await refresh();
   };
 
   const handlePromote = async (

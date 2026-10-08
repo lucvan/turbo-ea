@@ -218,24 +218,46 @@ describe("MitigationTasksPanel — failed writes that are not API errors", () =>
     expect(screen.getByText("Review access rights")).toBeInTheDocument();
   });
 
-  it("shows why completing a cycle failed", async () => {
+  it("shows why completing a cycle failed inside the dialog, which stays open", async () => {
     mockApi.on("post", "/mitigation-tasks/t1/occurrences/o1/complete", offline());
     const { user } = renderPanel();
     await screen.findByText("Review access rights");
     await user.click(button(rowOf("Review access rights"), "check_circle"));
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Mark done" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Failed to fetch");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Failed to fetch");
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
   });
 
-  it("shows why skipping a cycle failed", async () => {
+  it("shows why skipping a cycle failed inside the dialog, which stays open", async () => {
     mockApi.on("post", "/mitigation-tasks/t1/occurrences/o1/skip", throwsString());
     const { user } = renderPanel();
     await screen.findByText("Review access rights");
     await user.click(button(rowOf("Review access rights"), "skip_next"));
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Skip cycle" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Something went wrong");
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("closes the dialog once a complete lands, and shows a failed reload on the panel", async () => {
+    let reloads = 0;
+    mockApi.on("get", "/risks/r1/mitigation-tasks", () => {
+      reloads += 1;
+      if (reloads > 1) throw new TypeError("Failed to fetch");
+      return [OPEN, SCHEDULED];
+    });
+    mockApi.on("post", "/mitigation-tasks/t1/occurrences/o1/complete", {});
+    const { user } = renderPanel();
+    await screen.findByText("Review access rights");
+    await user.click(button(rowOf("Review access rights"), "check_circle"));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Mark done" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(await screen.findByRole("alert")).toHaveTextContent("Failed to fetch");
+    expect(mockApi.callsOf("post", "/mitigation-tasks/t1/occurrences/o1/complete")).toHaveLength(1);
   });
 
   it("shows why Activate now failed", async () => {

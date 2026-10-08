@@ -17,6 +17,20 @@ import type { InitiativeTreeNode } from "./useInitiativeData";
 
 export const UNLINKED_KEY = "__unlinked__";
 
+/** The Initiative type's own option for an `initiativeStatus` value, if any. */
+function useInitiativeStatusOption() {
+  const { types } = useMetamodel();
+  return useCallback(
+    (status: string) =>
+      types
+        .find((mt) => mt.key === "Initiative")
+        ?.fields_schema.flatMap((section) => section.fields)
+        .find((field) => field.key === "initiativeStatus")
+        ?.options?.find((o) => o.key === status),
+    [types],
+  );
+}
+
 /**
  * Names an initiative's `initiativeStatus` value — the sidebar's status dot and
  * the workspace header's status chip share it. The Initiative type's own
@@ -27,15 +41,11 @@ export const UNLINKED_KEY = "__unlinked__";
 // eslint-disable-next-line react-refresh/only-export-components
 export function useInitiativeStatusLabel() {
   const { t } = useTranslation(["delivery", "common"]);
-  const { types } = useMetamodel();
+  const statusOption = useInitiativeStatusOption();
   const optLabel = useOptionLabel();
   return useCallback(
     (status: string): string => {
-      const option = types
-        .find((mt) => mt.key === "Initiative")
-        ?.fields_schema.flatMap((section) => section.fields)
-        .find((field) => field.key === "initiativeStatus")
-        ?.options?.find((o) => o.key === status);
+      const option = statusOption(status);
       if (option) return optLabel(option);
       const builtIn: Record<string, string> = {
         onTrack: t("initiativeStatus.onTrack"),
@@ -46,7 +56,22 @@ export function useInitiativeStatusLabel() {
       };
       return builtIn[status] ?? status;
     },
-    [types, optLabel, t],
+    [statusOption, optLabel, t],
+  );
+}
+
+/**
+ * Colours an initiative's `initiativeStatus` value, resolved like its label:
+ * the Initiative type's option colour first, so an admin's custom option is
+ * not grey; the bundled colour for a built-in key; grey for anything else.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useInitiativeStatusColor() {
+  const statusOption = useInitiativeStatusOption();
+  return useCallback(
+    (status: string): string =>
+      statusOption(status)?.color || INITIATIVE_STATUS_COLORS[status] || STATUS_COLORS.neutral,
+    [statusOption],
   );
 }
 
@@ -55,7 +80,8 @@ export function useInitiativeStatusLabel() {
  * the row itself counts: the chevron and the star inside it are buttons of
  * their own, and their keys belong to them.
  */
-function selectOnKey(select: () => void) {
+// eslint-disable-next-line react-refresh/only-export-components
+export function selectOnKey(select: () => void) {
   return (e: KeyboardEvent<HTMLElement>) => {
     if (e.target !== e.currentTarget) return;
     if (e.key !== "Enter" && e.key !== " ") return;
@@ -271,6 +297,7 @@ function TreeBranch({
   onToggleFavorite,
 }: BranchProps) {
   const statusLabel = useInitiativeStatusLabel();
+  const statusColor = useInitiativeStatusColor();
   // Default: parents are open; collapses are user-driven, in-memory.
   const [open, setOpen] = useState(true);
   const hasChildren = node.children.length > 0;
@@ -379,8 +406,7 @@ function TreeBranch({
                 width: 8,
                 height: 8,
                 borderRadius: "50%",
-                bgcolor:
-                  INITIATIVE_STATUS_COLORS[initStatus] ?? STATUS_COLORS.neutral,
+                bgcolor: statusColor(initStatus),
               }}
             />
           </Tooltip>

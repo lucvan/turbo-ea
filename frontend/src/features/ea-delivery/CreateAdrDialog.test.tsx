@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import userEvent from "@testing-library/user-event";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
@@ -234,6 +234,49 @@ describe("CreateAdrDialog", () => {
 
     release(CREATED);
     await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+  });
+
+  it("cannot be left while the decision itself is being created, so nothing appears after a cancel", async () => {
+    let release: (v: ArchitectureDecision) => void = () => {};
+    mockApi.on(
+      "post",
+      "/adr",
+      () => new Promise<ArchitectureDecision>((resolve) => (release = resolve)),
+    );
+    const user = userEvent.setup();
+    const { onCreated, onClose } = renderDialog();
+
+    await user.type(screen.getByLabelText("Decision title"), "Slow one");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    await screen.findByRole("button", { name: "Creating..." });
+
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onCreated).not.toHaveBeenCalled();
+
+    // Once the decision exists the dialog finishes as usual: the parent hears about it once.
+    release(CREATED);
+    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("can be cancelled again once a failed create has answered", async () => {
+    let reject: (e: Error) => void = () => {};
+    mockApi.on("post", "/adr", () => new Promise<ArchitectureDecision>((_resolve, r) => (reject = r)));
+    const user = userEvent.setup();
+    const { onCreated, onClose } = renderDialog();
+
+    await user.type(screen.getByLabelText("Decision title"), "Slow one");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    await screen.findByRole("button", { name: "Creating..." });
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+
+    reject(new Error("boom"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Failed to create architecture decision");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onCreated).not.toHaveBeenCalled();
   });
 
   it("clears the previous error as soon as a retry starts", async () => {

@@ -126,9 +126,15 @@ export default function CreateAdrDialog({
     onClose();
   };
 
+  // While the decision itself is being created there is nothing to hand the
+  // parent yet, and a parent told about it later navigates to it — so the
+  // dialog cannot be left until the create has answered.
+  const createPending = creating && !created;
+
   // Leaving after a failed link still leaves a decision behind: the parent
   // hears about it, so its list shows the decision rather than going stale.
   const handleClose = () => {
+    if (createPending) return;
     if (created) reportCreated(created);
     onClose();
   };
@@ -199,7 +205,9 @@ export default function CreateAdrDialog({
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={handleClose}>{t("common:actions.cancel")}</Button>
+        <Button onClick={handleClose} disabled={createPending}>
+          {t("common:actions.cancel")}
+        </Button>
         <Button
           variant="contained"
           disabled={!title.trim() || creating}
