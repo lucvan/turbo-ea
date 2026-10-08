@@ -54,10 +54,10 @@ export default defineConfig({
       // + browser suite, lines only) has its own floor in package.json,
       // config.coverageFloorMergedLines, read by scripts/merge-lcov.mjs.
       thresholds: {
-        lines: 85,
-        statements: 84,
-        branches: 79,
-        functions: 82,
+        lines: 86,
+        statements: 85,
+        branches: 80,
+        functions: 83,
       },
     },
   },
