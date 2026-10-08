@@ -214,6 +214,78 @@ describe("ExtensionsAdmin — license dialog after a confirmed purchase", () => 
   });
 });
 
+// ── A purchase confirmed while the apply gate is open ──────────────────────
+
+describe("ExtensionsAdmin — a purchase confirmed over the apply gate", () => {
+  it("retries the refused apply, and leaves no gate behind for the next license dialog", async () => {
+    vi.spyOn(window, "open").mockReturnValue(null);
+    prime({ catalog: catalogOf(STORE_ITEM) });
+    let paid = false;
+    mockApi.on("post", CLAIM_PATH, () => ({ status: paid ? "applied" : "pending" }));
+    mockApi.on("upload", "/admin/extensions/install", {
+      id: "i1",
+      filename: "sample.teax",
+      status: "verifying",
+    });
+    let installed = false;
+    mockApi.on("get", "/admin/extensions/install/i1", () => ({
+      id: "i1",
+      filename: "sample.teax",
+      status: installed ? "installed" : "previewed",
+      extension_key: "sample-ext",
+      extension_version: "1.0.0",
+      diff: { totals: { ...ZERO_TOTALS, created: 1 } },
+    }));
+    let applies = 0;
+    mockApi.on("post", "/admin/extensions/install/i1/apply", () => {
+      applies += 1;
+      if (applies === 1) throw new ApiError("Not licensed", 403, null);
+      installed = true;
+      return { id: "i1", filename: "sample.teax", status: "applying" };
+    });
+    const { container } = renderPage();
+    await settle();
+
+    // A checkout from a tile is still being confirmed…
+    click(within(tileOf("ESG Content Pack")).getByText("Buy", { selector: "button" }));
+    // …while an uploaded bundle is refused for want of a license.
+    fireEvent.change(
+      container.querySelector('input[type="file"][accept=".teax,.zip"]') as HTMLInputElement,
+      { target: { files: [new File(["zip"], "sample.teax")] } },
+    );
+    await settle();
+    await tick(2000);
+    click(screen.getByText("Install extension", { selector: "button" }));
+    await settle();
+    const gate = dialogTitled("License required");
+    expect(within(gate).getByText(/needs a license to finish installing/)).toBeInTheDocument();
+
+    // The purchase lands: the refused apply continues, as a pasted license would.
+    paid = true;
+    await tick(5000);
+    expect(screen.getByText("Purchase confirmed — license applied.")).toBeInTheDocument();
+    expect(mockApi.callsOf("post", "/admin/extensions/install/i1/apply")).toHaveLength(2);
+    await tick(2000);
+    expect(screen.queryByText(/needs a license to finish installing/)).not.toBeInTheDocument();
+    click(screen.getByText("Close", { selector: "button" }));
+    await tick(500);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // The next license dialog is a plain one, not the apply gate.
+    click(tab("Installed"));
+    await settle();
+    click(screen.getByRole("button", { name: /Enter license/ }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Apply a license")).toBeInTheDocument();
+    expect(within(dialog).queryByText(/needs a license to finish installing/)).not.toBeInTheDocument();
+    mockApi.on("put", LICENSE_PATH, {});
+    typeLicense("another-license");
+    click(within(dialog).getByText("Apply license", { selector: "button" }));
+    await settle();
+    expect(mockApi.callsOf("post", "/admin/extensions/install/i1/apply")).toHaveLength(2);
+  });
+});
+
 // ── Discard racing a status reply ──────────────────────────────────────────
 
 describe("ExtensionsAdmin — a status reply after Discard", () => {
@@ -338,6 +410,39 @@ describe("ExtensionsAdmin — entitlement downgrade confirmation", () => {
       { text: "narrower-license", confirm: true },
     ]);
   });
+
+  for (const action of ["Cancel", "Apply anyway"]) {
+    it(`keeps the dropped extensions listed while the confirmation closes on ${action}`, async () => {
+      prime();
+      mockApi.on("put", LICENSE_PATH, (_path, body) => {
+        if (!(body as { confirm: boolean }).confirm) {
+          throw new ApiError("Conflict", 409, {
+            code: "entitlement_downgrade",
+            dropped: ["sample-ext", "gone-ext"],
+          });
+        }
+        return {};
+      });
+      renderPage("/admin/extensions?tab=installed");
+      await settle();
+
+      click(screen.getByRole("button", { name: /Enter license/ }));
+      typeLicense("narrower-license");
+      click(within(screen.getByRole("dialog")).getByText("Apply license", { selector: "button" }));
+      await settle();
+      const confirm = dialogTitled("This license drops active entitlements");
+      expect(within(confirm).getByText("Sample Extension")).toBeInTheDocument();
+      expect(within(confirm).getByText("gone-ext")).toBeInTheDocument();
+
+      click(within(confirm).getByText(action, { selector: "button" }));
+      await settle();
+      // Still fading out: the same list, not an empty one.
+      expect(within(confirm).getByText("Sample Extension")).toBeInTheDocument();
+      expect(within(confirm).getByText("gone-ext")).toBeInTheDocument();
+      await tick(500);
+      expect(screen.queryByText("This license drops active entitlements")).not.toBeInTheDocument();
+    });
+  }
 });
 
 // ── Update and downgrade confirmations ─────────────────────────────────────

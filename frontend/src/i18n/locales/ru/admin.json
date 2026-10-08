@@ -896,6 +896,7 @@
   "surveyBuilder.target.searchCards": "Поиск карточек...",
   "surveyBuilder.target.viaRelation": "Через связь",
   "surveyBuilder.target.viaAnyRelation": "Любая связь",
+  "surveyBuilder.target.typeUnavailable": "{{type}} (тип недоступен)",
   "surveyBuilder.target.filterTags": "Фильтр по тегам (необязательно)",
   "surveyBuilder.target.selectTags": "Выберите теги...",
   "surveyBuilder.target.filterAttributes": "Фильтр по атрибутам (необязательно)",

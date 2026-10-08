@@ -506,9 +506,10 @@ describe("SurveyBuilder — preview", () => {
     await user.click(screen.getByText("Criticality"));
     await user.click(next());
 
-    // Two step saves and the preview's own save, all refused.
-    await waitFor(() => expect(mockApi.callsOf("post", "/surveys")).toHaveLength(3));
     expect(await screen.findByRole("button", { name: "Load Preview" })).toBeInTheDocument();
+    // The Target step's save and the preview's own save (the step into the
+    // preview saves only through it), both refused.
+    expect(mockApi.callsOf("post", "/surveys")).toHaveLength(2);
     expect(screen.getByText("POST /surveys failed")).toBeInTheDocument();
     expect(mockApi.callsOf("post", /preview/)).toHaveLength(0);
   });

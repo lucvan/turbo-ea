@@ -85,7 +85,7 @@ const APP = makeCardType({
   ],
 });
 const ORG = makeCardType({ key: "Organization", label: "Organization" });
-const RETIRED = makeCardType({ key: "Retired", label: "Retired", is_hidden: true });
+const RETIRED = makeCardType({ key: "Retired", label: "Legacy systems", is_hidden: true });
 
 const ORG_OWNS_APP = makeRelationType({
   key: "relOrgToAppOwns",
@@ -236,9 +236,10 @@ describe("SurveyBuilder — a reopened draft's relation narrowing", () => {
 });
 
 describe("SurveyBuilder — a draft whose target type is gone", () => {
-  for (const [what, typeKey] of [
-    ["removed from the metamodel", "Deleted"],
-    ["hidden", "Retired"],
+  // A hidden type is still in the metamodel, so it is named by its label.
+  for (const [what, typeKey, shown] of [
+    ["removed from the metamodel", "Deleted", "Deleted"],
+    ["hidden", "Retired", "Legacy systems"],
   ] as const) {
     it(`refuses to leave the Target step for a type ${what}`, async () => {
       mockApi.on("get", "/surveys/survey-7", { ...SAVED, target_type_key: typeKey, target_filters: {} });
@@ -252,7 +253,59 @@ describe("SurveyBuilder — a draft whose target type is gone", () => {
       expect(screen.getByText("Target Cards")).toBeInTheDocument();
       expect(screen.queryByText("Select Fields")).not.toBeInTheDocument();
     });
+
+    it(`names a type ${what} as unavailable, without MUI's out-of-range warning`, async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        mockApi.on("get", "/surveys/survey-7", { ...SAVED, target_type_key: typeKey, target_filters: {} });
+        const { user } = renderBuilder("/admin/surveys/survey-7");
+        await openDraft();
+        await user.click(next());
+        await screen.findByText("Target Cards");
+
+        const typeSelect = screen.getByRole("combobox", { name: /^Type/ });
+        expect(typeSelect).toHaveTextContent(`${shown} (unavailable)`);
+        await user.click(typeSelect);
+        expect(await screen.findByRole("option", { name: `${shown} (unavailable)` })).toHaveAttribute(
+          "aria-disabled",
+          "true",
+        );
+        // A type that is offered replaces it.
+        await user.click(screen.getByRole("option", { name: /Application/ }));
+        await waitFor(() =>
+          expect(screen.getByRole("combobox", { name: /^Type/ })).toHaveTextContent("Application"),
+        );
+        await user.click(screen.getByRole("combobox", { name: /^Type/ }));
+        await screen.findByRole("option", { name: /Application/ });
+        expect(screen.queryByRole("option", { name: /unavailable/ })).not.toBeInTheDocument();
+
+        const outOfRange = warn.mock.calls.filter((args) => String(args[0]).includes("out-of-range"));
+        expect(outOfRange).toEqual([]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
   }
+
+  it("does not call a stored type unavailable while the metamodel is still loading", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      hookState.metamodel = { types: [], relationTypes: [], loading: true };
+      mockApi.on("get", "/surveys/survey-7", { ...SAVED, target_filters: {} });
+      const { user } = renderBuilder("/admin/surveys/survey-7");
+      await openDraft();
+      await user.click(next());
+      await screen.findByText("Target Cards");
+
+      const typeSelect = screen.getByRole("combobox", { name: /^Type/ });
+      expect(typeSelect).toHaveTextContent("Application");
+      expect(typeSelect).not.toHaveTextContent("unavailable");
+      const outOfRange = warn.mock.calls.filter((args) => String(args[0]).includes("out-of-range"));
+      expect(outOfRange).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });
 
 describe("SurveyBuilder — the route changing in place", () => {
@@ -288,6 +341,49 @@ describe("SurveyBuilder — the route changing in place", () => {
   });
 });
 
+describe("SurveyBuilder — a card lookup that outlives its survey", () => {
+  it("does not bring the previous survey's chips back when its lookups land late", async () => {
+    mockApi.on("get", "/surveys/survey-7", {
+      ...SAVED,
+      target_filters: { card_ids: ["app-1"], related_ids: ["org-1"] },
+    });
+    mockApi.on("get", "/surveys/survey-8", {
+      ...SAVED,
+      id: "survey-8",
+      name: "Second",
+      target_filters: { card_ids: ["app-2"], related_ids: ["org-2"] },
+    });
+    const firstApp = deferred<object>();
+    const firstOrg = deferred<object>();
+    mockApi.on("get", "/cards/app-1", () => firstApp.promise);
+    mockApi.on("get", "/cards/org-1", () => firstOrg.promise);
+    mockApi.on("get", "/cards/app-2", { id: "app-2", name: "Second App", type: "Application" });
+    mockApi.on("get", "/cards/org-2", { id: "org-2", name: "Second Org", type: "Organization" });
+    const { user } = renderBuilder("/admin/surveys/survey-7");
+    await openDraft();
+    await user.click(next());
+    await screen.findByText("Target Cards");
+    await waitFor(() => expect(mockApi.callsOf("get", "/cards/org-1")).toHaveLength(1));
+
+    await user.click(screen.getByRole("button", { name: "go /admin/surveys/survey-8" }));
+    expect(await screen.findByText("Second App")).toBeInTheDocument();
+    expect(await screen.findByText("Second Org")).toBeInTheDocument();
+
+    // The first survey's lookups answer only now.
+    await act(async () => {
+      firstApp.resolve({ id: "app-1", name: "First App", type: "Application" });
+      firstOrg.resolve({ id: "org-1", name: "First Org", type: "Organization" });
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(screen.queryByText("First App")).not.toBeInTheDocument();
+    expect(screen.queryByText("First Org")).not.toBeInTheDocument();
+    expect(screen.getByTestId("specific-picker").querySelectorAll("span")).toHaveLength(1);
+    expect(screen.getByTestId("related-picker").querySelectorAll("span")).toHaveLength(1);
+  });
+});
+
 describe("SurveyBuilder — narrowing picked related cards", () => {
   async function toTargetWithType(user: ReturnType<typeof renderBuilder>["user"]) {
     await user.type(await screen.findByLabelText(/Survey Name/), "Owner check");
@@ -313,10 +409,10 @@ describe("SurveyBuilder — narrowing picked related cards", () => {
     await waitFor(() =>
       expect(screen.queryByRole("combobox", { name: /Via relation/ })).not.toBeInTheDocument(),
     );
-    // Picking the card again starts un-narrowed ("any relation" is the empty value).
+    // Picking the card again starts un-narrowed.
     await user.click(screen.getByText("related: Org"));
-    expect(await screen.findByRole("combobox", { name: /Via relation/ })).not.toHaveTextContent(
-      "is owned by",
+    expect(await screen.findByRole("combobox", { name: /Via relation/ })).toHaveTextContent(
+      "Any relation",
     );
     await user.click(screen.getByRole("button", { name: /Save Draft/ }));
     await waitFor(() => expect(mockApi.callsOf("post", "/surveys")).toHaveLength(1));
@@ -360,5 +456,77 @@ describe("SurveyBuilder — entering the preview step", () => {
     await act(async () => pending.resolve(PREVIEW));
     expect(await screen.findByText("CRM")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Load Preview" })).not.toBeInTheDocument();
+  });
+});
+
+describe("SurveyBuilder — entering the preview writes the draft once", () => {
+  it("creates one survey when the earlier auto-save failed", async () => {
+    let attempt = 0;
+    mockApi.on("post", "/surveys", () => {
+      attempt += 1;
+      if (attempt === 1) throw new Error("db down");
+      return { id: `survey-${attempt - 1}` };
+    });
+    mockApi.on("post", /^\/surveys\/survey-\d+\/preview$/, PREVIEW);
+    const { user } = renderBuilder();
+    await user.type(await screen.findByLabelText(/Survey Name/), "Owner check");
+    await user.click(next());
+    await screen.findByText("Target Cards");
+    await user.click(screen.getByRole("combobox", { name: /^Type/ }));
+    await user.click(await screen.findByRole("option", { name: /Application/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Business Owner/ }));
+    await user.click(next());
+    // The Target step's auto-save was refused: there is still no draft id.
+    expect(await screen.findByText("db down")).toBeInTheDocument();
+    await screen.findByText("Select Fields");
+    await user.click(screen.getByText("Criticality"));
+
+    await user.click(next());
+    expect(await screen.findByText("CRM")).toBeInTheDocument();
+    // The refused save and ONE create — not a create for the step and another
+    // for the preview.
+    expect(mockApi.callsOf("post", "/surveys")).toHaveLength(2);
+    expect(mockApi.callsOf("post", /\/preview$/).map((c) => c.path)).toEqual([
+      "/surveys/survey-1/preview",
+    ]);
+  });
+
+  it("saves an existing draft once before previewing it", async () => {
+    mockApi.on("get", "/surveys/survey-7", { ...SAVED, target_filters: {} });
+    mockApi.on("post", "/surveys/survey-7/preview", PREVIEW);
+    const { user } = renderBuilder("/admin/surveys/survey-7");
+    await openDraft();
+    await user.click(next());
+    await screen.findByText("Target Cards");
+    await user.click(next());
+    await screen.findByText("Select Fields");
+    await waitFor(() => expect(mockApi.callsOf("patch", "/surveys/survey-7")).toHaveLength(2));
+    await user.click(screen.getByText("Criticality"));
+
+    await user.click(next());
+    expect(await screen.findByText("CRM")).toBeInTheDocument();
+    expect(mockApi.callsOf("patch", "/surveys/survey-7")).toHaveLength(3);
+    // The one save carries the field just ticked, and lands before the preview.
+    expect((lastDraft().fields as { key: string }[]).map((f) => f.key)).toEqual(["criticality"]);
+    const order = mockApi.calls
+      .filter((c) => c.path.startsWith("/surveys/survey-7"))
+      .map((c) => `${c.method} ${c.path}`);
+    expect(order.slice(-2)).toEqual(["patch /surveys/survey-7", "post /surveys/survey-7/preview"]);
+  });
+});
+
+describe("SurveyBuilder — the Via relation select", () => {
+  it("shows «Any relation» while no relation is chosen", async () => {
+    const { user } = renderBuilder();
+    await user.type(await screen.findByLabelText(/Survey Name/), "Owner check");
+    await user.click(next());
+    await screen.findByText("Target Cards");
+    await user.click(screen.getByRole("combobox", { name: /^Type/ }));
+    await user.click(await screen.findByRole("option", { name: /Application/ }));
+    await user.click(screen.getByText("related: Org"));
+
+    expect(await screen.findByRole("combobox", { name: /Via relation/ })).toHaveTextContent(
+      "Any relation",
+    );
   });
 });

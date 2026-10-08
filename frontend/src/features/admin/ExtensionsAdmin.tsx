@@ -288,6 +288,10 @@ export default function ExtensionsAdmin() {
     text: string;
     dropped: string[];
   } | null>(null);
+  // What the confirmation lists: the last value it was opened with, so the
+  // dropped extensions stay put while the dialog fades out after being cleared.
+  const [shownLicenseDowngrade, setShownLicenseDowngrade] = useState(downgrade);
+  if (downgrade && downgrade !== shownLicenseDowngrade) setShownLicenseDowngrade(downgrade);
 
   // Purchase claim polling (Buy → Stripe tab → poll until license lands).
   const [claiming, setClaiming] = useState<{
@@ -645,12 +649,18 @@ export default function ExtensionsAdmin() {
             );
             await loadAll();
             const continueKey = pendingInstallRef.current;
+            const continueApplyId = pendingApplyRef.current;
             setLicenseDialogOpen(false);
             setGateItem(null);
             setLicenseText("");
             setLicenseError(null);
+            setApplyGate(false);
             pendingInstallRef.current = null;
-            if (continueKey) void startStoreInstall(continueKey);
+            pendingApplyRef.current = null;
+            // Resume whatever the license was needed for, as a pasted one
+            // does: the uploaded file waiting to be applied, or a store install.
+            if (continueApplyId) void applyInstall(continueApplyId);
+            else if (continueKey) void startStoreInstall(continueKey);
             return;
           }
         } catch {
@@ -670,7 +680,7 @@ export default function ExtensionsAdmin() {
         pollClaim(token, itemKey);
       }, CLAIM_POLL_MS);
     },
-    [clearClaimPoll, loadAll, startStoreInstall, t],
+    [clearClaimPoll, loadAll, startStoreInstall, applyInstall, t],
   );
 
   // Open a Stripe checkout link (paid subscription or no-card trial) and
@@ -1858,7 +1868,7 @@ export default function ExtensionsAdmin() {
             )}
           </DialogContentText>
           <Stack spacing={0.5} sx={{ mb: 1.5 }}>
-            {(downgrade?.dropped ?? []).map((key) => (
+            {(shownLicenseDowngrade?.dropped ?? []).map((key) => (
               <Stack key={key} direction="row" spacing={1} alignItems="center">
                 <MaterialSymbol icon="extension_off" size={18} />
                 <Typography variant="body2">

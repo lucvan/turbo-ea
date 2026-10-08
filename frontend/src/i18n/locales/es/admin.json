@@ -896,6 +896,7 @@
   "surveyBuilder.target.searchCards": "Buscar fichas...",
   "surveyBuilder.target.viaRelation": "A través de la relación",
   "surveyBuilder.target.viaAnyRelation": "Cualquier relación",
+  "surveyBuilder.target.typeUnavailable": "{{type}} (no disponible)",
   "surveyBuilder.target.filterTags": "Filtrar por etiquetas (opcional)",
   "surveyBuilder.target.selectTags": "Seleccionar etiquetas...",
   "surveyBuilder.target.filterAttributes": "Filtrar por atributos (opcional)",

@@ -896,6 +896,7 @@
   "surveyBuilder.target.searchCards": "البحث عن البطاقات...",
   "surveyBuilder.target.viaRelation": "عبر العلاقة",
   "surveyBuilder.target.viaAnyRelation": "أي علاقة",
+  "surveyBuilder.target.typeUnavailable": "{{type}} (غير متاح)",
   "surveyBuilder.target.filterTags": "تصفية حسب الوسوم (اختياري)",
   "surveyBuilder.target.selectTags": "اختر الوسوم...",
   "surveyBuilder.target.filterAttributes": "تصفية حسب السمات (اختياري)",

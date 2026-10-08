@@ -148,7 +148,7 @@ function CyclePickerDialog({
                       </Typography>
                       {c.latest && (
                         <Typography variant="caption" color="text.secondary">
-                          (latest: {c.latest})
+                          ({t("cards:eol.latest", { version: c.latest })})
                         </Typography>
                       )}
                       <Box sx={{ ml: "auto" }}>

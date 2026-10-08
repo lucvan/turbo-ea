@@ -896,6 +896,7 @@
   "surveyBuilder.target.searchCards": "Search cards...",
   "surveyBuilder.target.viaRelation": "Via relation",
   "surveyBuilder.target.viaAnyRelation": "Any relation",
+  "surveyBuilder.target.typeUnavailable": "{{type}} (unavailable)",
   "surveyBuilder.target.filterTags": "Filter by Tags (optional)",
   "surveyBuilder.target.selectTags": "Select tags...",
   "surveyBuilder.target.filterAttributes": "Filter by Attributes (optional)",

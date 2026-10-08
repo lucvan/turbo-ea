@@ -5,7 +5,7 @@
  * trimmed, the way the dialogs' enabled check already reads them.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, within, waitFor } from "@testing-library/react";
+import { render, screen, within, waitFor, fireEvent } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 
 vi.mock("@/api/client", () => import("@/test/apiMock").then((m) => m.apiClientModule()));
@@ -230,5 +230,141 @@ describe("TagsAdmin names", () => {
     await user.click(within(dialog).getByRole("button", { name: "Add" }));
     await waitFor(() => expect(mockApi.callsOf("post", tagsPath)).toHaveLength(1));
     expect(mockApi.callsOf("post", tagsPath)[0].body).toMatchObject({ name: "Hybrid" });
+  });
+});
+
+describe("TagsAdmin edited names", () => {
+  it("saves an edited group under its trimmed name", async () => {
+    mockApi.on("patch", `/tag-groups/${RISK_GROUP.id}`, {});
+    const user = await renderPage();
+    await user.click(within(groupCard("Risk")).getByRole("button", { name: "Edit Tag Group" }));
+    const dialog = await screen.findByRole("dialog");
+    const name = within(dialog).getByLabelText("Group Name");
+    await user.clear(name);
+    await user.type(name, "  Risk level  ");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(mockApi.callsOf("patch", `/tag-groups/${RISK_GROUP.id}`)).toHaveLength(1),
+    );
+    expect(mockApi.callsOf("patch", `/tag-groups/${RISK_GROUP.id}`)[0].body).toMatchObject({
+      name: "Risk level",
+    });
+  });
+
+  it("saves an edited tag under its trimmed name", async () => {
+    mockApi.on("patch", `${tagsPath}/${onPrem.id}`, {});
+    const user = await renderPage();
+    await user.click(within(groupCard("Hosting")).getByText("On-Prem"));
+    const dialog = await screen.findByRole("dialog");
+    const name = within(dialog).getByLabelText("Tag Name");
+    await user.clear(name);
+    await user.type(name, " On-Premises ");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mockApi.callsOf("patch", `${tagsPath}/${onPrem.id}`)).toHaveLength(1));
+    expect(mockApi.callsOf("patch", `${tagsPath}/${onPrem.id}`)[0].body).toMatchObject({
+      name: "On-Premises",
+    });
+  });
+});
+
+describe("TagsAdmin double submit", () => {
+  /** A reply that stays pending until the test releases it. */
+  function pending() {
+    let release: () => void = () => {};
+    const reply = () =>
+      new Promise<object>((resolve) => {
+        release = () => resolve({});
+      });
+    return { reply, release: () => release() };
+  }
+
+  /**
+   * Click `submit` twice before the first request settles: one request is
+   * sent, the button is disabled while it is in flight, and the dialog closes
+   * once it succeeds.
+   */
+  async function expectSingleSubmit(
+    dialog: HTMLElement,
+    submit: string,
+    method: "post" | "patch" | "delete",
+    path: string,
+    release: () => void,
+  ) {
+    const button = within(dialog).getByRole("button", { name: submit });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(mockApi.callsOf(method, path)).toHaveLength(1);
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: submit })).toBeDisabled());
+    fireEvent.click(within(dialog).getByRole("button", { name: submit }));
+    expect(mockApi.callsOf(method, path)).toHaveLength(1);
+    release();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mockApi.callsOf(method, path)).toHaveLength(1);
+  }
+
+  it("creates a group once on a double click", async () => {
+    const { reply, release } = pending();
+    mockApi.on("post", "/tag-groups", reply);
+    const user = await renderPage();
+    await user.click(screen.getByRole("button", { name: /New Tag Group/ }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Group Name"), "Region");
+    await expectSingleSubmit(dialog, "Create", "post", "/tag-groups", release);
+  });
+
+  it("adds a tag once on a double click", async () => {
+    const { reply, release } = pending();
+    mockApi.on("post", tagsPath, reply);
+    const user = await renderPage();
+    await user.click(within(groupCard("Hosting")).getByRole("button", { name: "Add Tag" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Tag Name"), "Hybrid");
+    await expectSingleSubmit(dialog, "Add", "post", tagsPath, release);
+  });
+
+  it("saves a group once on a double click", async () => {
+    const { reply, release } = pending();
+    mockApi.on("patch", `/tag-groups/${RISK_GROUP.id}`, reply);
+    const user = await renderPage();
+    await user.click(within(groupCard("Risk")).getByRole("button", { name: "Edit Tag Group" }));
+    const dialog = await screen.findByRole("dialog");
+    await expectSingleSubmit(dialog, "Save", "patch", `/tag-groups/${RISK_GROUP.id}`, release);
+  });
+
+  it("saves a tag once on a double click", async () => {
+    const { reply, release } = pending();
+    mockApi.on("patch", `${tagsPath}/${onPrem.id}`, reply);
+    const user = await renderPage();
+    await user.click(within(groupCard("Hosting")).getByText("On-Prem"));
+    const dialog = await screen.findByRole("dialog");
+    await expectSingleSubmit(dialog, "Save", "patch", `${tagsPath}/${onPrem.id}`, release);
+  });
+
+  it("deletes once on a double click", async () => {
+    const { reply, release } = pending();
+    mockApi.on("delete", `/tag-groups/${RISK_GROUP.id}`, reply);
+    const user = await renderPage();
+    await user.click(within(groupCard("Risk")).getByRole("button", { name: "Delete Tag Group" }));
+    const dialog = await screen.findByRole("dialog");
+    await expectSingleSubmit(dialog, "Delete", "delete", `/tag-groups/${RISK_GROUP.id}`, release);
+  });
+
+  it("lets the user submit again after a failed request", async () => {
+    let fail = true;
+    mockApi.on("post", "/tag-groups", () => {
+      if (fail) throw new Error("db down");
+      return {};
+    });
+    const user = await renderPage();
+    await user.click(screen.getByRole("button", { name: /New Tag Group/ }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Group Name"), "Region");
+    await user.click(within(dialog).getByRole("button", { name: "Create" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("db down");
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Create" })).toBeEnabled());
+    fail = false;
+    await user.click(within(dialog).getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mockApi.callsOf("post", "/tag-groups")).toHaveLength(2);
   });
 });

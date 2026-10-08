@@ -896,6 +896,7 @@
   "surveyBuilder.target.searchCards": "搜索卡片...",
   "surveyBuilder.target.viaRelation": "通过关系",
   "surveyBuilder.target.viaAnyRelation": "任意关系",
+  "surveyBuilder.target.typeUnavailable": "{{type}}（不可用）",
   "surveyBuilder.target.filterTags": "按标签筛选（可选）",
   "surveyBuilder.target.selectTags": "选择标签...",
   "surveyBuilder.target.filterAttributes": "按属性筛选（可选）",

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, useMemo, useCallback } from "react";
+import { Fragment, useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import Box from "@mui/material/Box";
@@ -72,7 +72,7 @@ export default function SurveyBuilder() {
   const { t } = useTranslation(["admin", "common"]);
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { types, relationTypes } = useMetamodel();
+  const { types, relationTypes, loading: metamodelLoading } = useMetamodel();
   const extFieldTypes = useExtensionFieldTypes();
   const typeLabel = useTypeLabel();
   const { formatDate } = useDateFormat();
@@ -157,6 +157,13 @@ export default function SurveyBuilder() {
   const [preview, setPreview] = useState<SurveyPreviewResult | null>(null);
   const [previewing, setPreviewing] = useState(false);
 
+  // The survey the route currently names, for replies that land after it
+  // changed in place.
+  const currentIdRef = useRef(id);
+  useEffect(() => {
+    currentIdRef.current = id;
+  }, [id]);
+
   // Load existing survey if editing
   useEffect(() => {
     if (!id) return;
@@ -221,11 +228,15 @@ export default function SurveyBuilder() {
       [cardIds, cardItems, setCardItems],
       [relatedIds, relatedItems, setRelatedItems],
     ];
+    // A reply for a survey the route has since moved away from is dropped:
+    // landing late, it would put that survey's chips back on this one.
+    const forSurvey = id;
     for (const [ids, held, setHeld] of wanted) {
       const missing = ids.filter((id) => !held.some((c) => c.id === id));
       if (missing.length === 0) continue;
       Promise.all(missing.map((id) => api.get<Card>(`/cards/${id}`).catch(() => null))).then(
         (cards) => {
+          if (currentIdRef.current !== forSurvey) return;
           const fetched = cards.filter((c): c is Card => !!c);
           if (fetched.length === 0) return;
           setHeld((prev) => {
@@ -248,6 +259,9 @@ export default function SurveyBuilder() {
     () => types.find((ct) => ct.key === targetTypeKey),
     [types, targetTypeKey],
   );
+  // Whether the Type select offers the target type: a draft's type may have
+  // been removed or hidden since it was saved.
+  const targetTypeOffered = !!selectedType && !selectedType.is_hidden;
 
   const allFields = useMemo(() => {
     if (!selectedType) return [];
@@ -606,8 +620,8 @@ export default function SurveyBuilder() {
       return;
     }
     // Against the types the select offers: a draft's type may have been
-    // removed or hidden since, which leaves the select blank.
-    if (activeStep === 1 && !types.some((ct) => ct.key === targetTypeKey && !ct.is_hidden)) {
+    // removed or hidden since, which the select only shows as unavailable.
+    if (activeStep === 1 && !targetTypeOffered) {
       setError(t("surveyBuilder.validation.typeRequired"));
       return;
     }
@@ -622,17 +636,23 @@ export default function SurveyBuilder() {
 
     setError("");
 
+    // Entering step 4: the preview's own save (which creates the draft when
+    // there is no id yet) is this step's auto-save. Saving here as well wrote
+    // the draft twice — and, with no id yet, created two surveys, since the
+    // preview's `saveDraft` was captured before this one's id arrived.
+    if (activeStep === 2) {
+      setActiveStep((prev) => prev + 1);
+      // In the same render that shows the step.
+      void loadPreview();
+      return;
+    }
+
     // Auto-save on step changes
     if (targetTypeKey && name.trim()) {
       await saveDraft();
     }
 
     setActiveStep((prev) => prev + 1);
-
-    // Auto-load preview on step 4, in the same render that shows the step.
-    if (activeStep === 2) {
-      void loadPreview();
-    }
   };
 
   const handleBack = () => {
@@ -749,6 +769,18 @@ export default function SurveyBuilder() {
                   </Box>
                 </MenuItem>
               ))}
+            {/* A draft's stored type that is no longer offered stays listed,
+                disabled, so the select shows it instead of rendering blank
+                (with MUI's out-of-range warning). Next still refuses it. */}
+            {targetTypeKey && !targetTypeOffered && (
+              <MenuItem value={targetTypeKey} disabled>
+                {metamodelLoading
+                  ? targetTypeKey
+                  : t("surveyBuilder.target.typeUnavailable", {
+                      type: selectedType ? typeLabel(selectedType) : targetTypeKey,
+                    })}
+              </MenuItem>
+            )}
           </TextField>
 
           <Divider sx={{ my: 2 }} />
@@ -804,6 +836,8 @@ export default function SurveyBuilder() {
               label={t("surveyBuilder.target.viaRelation")}
               value={relationTypeKey}
               onChange={(e) => setRelationTypeKey(e.target.value)}
+              // "" is "Any relation": without displayEmpty MUI renders it blank.
+              slotProps={{ select: { displayEmpty: true } }}
               sx={{ mb: 3 }}
             >
               <MenuItem value="">{t("surveyBuilder.target.viaAnyRelation")}</MenuItem>

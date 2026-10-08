@@ -896,6 +896,7 @@
   "surveyBuilder.target.searchCards": "Søg kort...",
   "surveyBuilder.target.viaRelation": "Via relation",
   "surveyBuilder.target.viaAnyRelation": "Enhver relation",
+  "surveyBuilder.target.typeUnavailable": "{{type}} (ikke tilgængelig)",
   "surveyBuilder.target.filterTags": "Filtrér efter tags (valgfrit)",
   "surveyBuilder.target.selectTags": "Vælg tags...",
   "surveyBuilder.target.filterAttributes": "Filtrér efter egenskaber (valgfrit)",

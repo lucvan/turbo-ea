@@ -168,14 +168,18 @@ export default function RelationTypeValuesDialog({ open, relationType, onClose, 
     }
   };
 
+  // A custom row is labelled by its `label`: the canonical fallback every
+  // locale without a translation shows. A translation alone leaves the row
+  // unlabelled everywhere else, so the red flag, the key's `required` and the
+  // Save check below all read this one rule.
+  const labelled = (row: { label?: string }) => !!(row.label ?? "").trim();
+
   // Validation: every custom field/option needs a valid key + label.
   const invalid = schema.some(
     (f) =>
       isManaged(f) &&
-      ((!f.built_in && (!isValidKey(f.key) || !(f.label ?? "").trim())) ||
-        (f.options ?? []).some(
-          (o) => !o.built_in && (!isValidKey(o.key) || !(o.label ?? "").trim()),
-        )),
+      ((!f.built_in && (!isValidKey(f.key) || !labelled(f))) ||
+        (f.options ?? []).some((o) => !o.built_in && (!isValidKey(o.key) || !labelled(o)))),
   );
 
   // Keys must be unique: dimension keys across the whole schema, and option keys
@@ -233,7 +237,7 @@ export default function RelationTypeValuesDialog({ open, relationType, onClose, 
                     value={f.translations?.[locale] ?? f.label}
                     onChange={(e) => setFieldLabel(fi, e.target.value)}
                     sx={{ flex: 1 }}
-                    error={!(f.translations?.[locale] ?? f.label ?? "").trim()}
+                    error={!labelled(f)}
                   />
                   <Tooltip title={t("common:actions.delete")}>
                     <IconButton size="small" onClick={() => removeField(fi)}>
@@ -253,7 +257,7 @@ export default function RelationTypeValuesDialog({ open, relationType, onClose, 
                 locked={!!f._original}
                 lockedReason={t("metamodel.fieldEditor.keyLockedReason")}
                 sx={{ mb: 1.5 }}
-                required={!!(f.translations?.[locale] ?? f.label ?? "").trim()}
+                required={labelled(f)}
                 externalError={
                   duplicateDimensionKeys.has(f.key) ? t("validation:key.duplicate") : undefined
                 }
@@ -304,7 +308,7 @@ export default function RelationTypeValuesDialog({ open, relationType, onClose, 
                     locked={!!opt._original}
                     lockedReason={t("metamodel.fieldEditor.optionKeyLocked")}
                     sx={{ flex: 1 }}
-                    required={!!(opt.translations?.[locale] ?? opt.label ?? "").trim()}
+                    required={labelled(opt)}
                     externalError={
                       duplicateOptionKeysByField.get(fi)?.has(opt.key)
                         ? t("validation:key.duplicate")
@@ -317,7 +321,7 @@ export default function RelationTypeValuesDialog({ open, relationType, onClose, 
                     value={opt.translations?.[locale] ?? opt.label}
                     onChange={(e) => setOptionLabel(fi, oi, e.target.value)}
                     sx={{ flex: 1 }}
-                    error={!(opt.translations?.[locale] ?? opt.label ?? "").trim()}
+                    error={!labelled(opt)}
                   />
                   <ColorPicker
                     compact
