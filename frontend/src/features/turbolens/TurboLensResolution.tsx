@@ -52,6 +52,8 @@ export default function TurboLensResolution() {
   const [categoryFilter, setCategoryFilter] = useState("__all__");
   const [sortBy, setSortBy] = useState<SortKey>("linked");
   const { startPolling, polling: pollActive } = useAnalysisPolling(() => loadHierarchy(), (msg) => setError(msg));
+  // A type the resolver did not name is shown as it came.
+  const vendorTypeLabel = (tp: string) => t(`turbolens_vendor_type_${tp}`, { defaultValue: tp });
 
   const loadHierarchy = useCallback(async () => {
     setLoading(true);
@@ -237,7 +239,7 @@ export default function TurboLensResolution() {
               >
                 <MenuItem value="__all__">{t("turbolens_filter_all")}</MenuItem>
                 {allTypes.map(tp => (
-                  <MenuItem key={tp} value={tp}>{tp}</MenuItem>
+                  <MenuItem key={tp} value={tp}>{vendorTypeLabel(tp)}</MenuItem>
                 ))}
               </Select>
             </FormControl>
@@ -296,7 +298,8 @@ export default function TurboLensResolution() {
                     </TableCell>
                     <TableCell>
                       <Chip
-                        label={v.vendor_type}
+                        // Same derivation as the type filter: an untyped entry is "unknown".
+                        label={vendorTypeLabel(v.vendor_type || "unknown")}
                         size="small"
                         color={vendorTypeColor(v.vendor_type)}
                       />

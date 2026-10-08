@@ -922,8 +922,13 @@ export default function TurboLensArchitect() {
   }, [resumeId, setSearchParams]);
 
   // Build merged dependency graph from existing + proposed
-  const buildMergedGraph = useCallback((): { nodes: GNode[]; edges: GEdge[] } => {
-    if (!capabilityMapping) return { nodes: [], edges: [] };
+  const buildMergedGraph = useCallback((): {
+    nodes: GNode[];
+    edges: GEdge[];
+    /** The name of the node a relation end is drawn to, if it is drawn at all. */
+    nameOf: (refId: string | undefined) => string | undefined;
+  } => {
+    if (!capabilityMapping) return { nodes: [], edges: [], nameOf: () => undefined };
     const existing = capabilityMapping.existingDependencies;
     const nodeMap = new Map<string, GNode>();
 
@@ -986,28 +991,29 @@ export default function TurboLensArchitect() {
       }
     }
 
+    const resolveId = (refId: string | undefined): string | undefined => {
+      // An end that is not set resolves to nothing — it must not match a
+      // capability or card whose existingCardId is unset too.
+      if (!refId) return undefined;
+      // Check capabilities by id or existingCardId
+      const cap = capabilityMapping.capabilities.find(
+        (c) => c.id === refId || c.existingCardId === refId,
+      );
+      if (cap) return cap.existingCardId || cap.id;
+      // Check proposedCards by existingCardId (handles dedup remapping)
+      const pc = capabilityMapping.proposedCards.find(
+        (c) => c.existingCardId === refId,
+      );
+      if (pc) return pc.id;
+      // If the ID is in the nodeMap already, use it directly
+      if (nodeMap.has(refId)) return refId;
+      return refId;
+    };
+
     // Proposed relations as edges — enforce metamodel source/target direction
     for (const rel of capabilityMapping.proposedRelations) {
       // Skip relations involving disabled cards
       if (disabledIds.has(rel.sourceId) || disabledIds.has(rel.targetId)) continue;
-      const resolveId = (refId: string | undefined): string | undefined => {
-        // An end that is not set resolves to nothing — it must not match a
-        // capability or card whose existingCardId is unset too.
-        if (!refId) return undefined;
-        // Check capabilities by id or existingCardId
-        const cap = capabilityMapping.capabilities.find(
-          (c) => c.id === refId || c.existingCardId === refId,
-        );
-        if (cap) return cap.existingCardId || cap.id;
-        // Check proposedCards by existingCardId (handles dedup remapping)
-        const pc = capabilityMapping.proposedCards.find(
-          (c) => c.existingCardId === refId,
-        );
-        if (pc) return pc.id;
-        // If the ID is in the nodeMap already, use it directly
-        if (nodeMap.has(refId)) return refId;
-        return refId;
-      };
       let sid = resolveId(rel.sourceId);
       let tid = resolveId(rel.targetId);
       if (!sid || !tid || !nodeMap.has(sid) || !nodeMap.has(tid)) continue;
@@ -1043,10 +1049,16 @@ export default function TurboLensArchitect() {
       (n) => !n.proposed || connectedIds.has(n.id),
     );
 
-    return { nodes: filteredNodes, edges };
+    const nameOf = (refId: string | undefined): string | undefined => {
+      const id = resolveId(refId);
+      return id ? nodeMap.get(id)?.name : undefined;
+    };
+
+    return { nodes: filteredNodes, edges, nameOf };
   }, [capabilityMapping, relationTypes]);
 
-  // Comprehensive name lookup for relation display (covers all ID sources)
+  // Names a relation end the diagram does not draw — a switched-off card's
+  // end, named after the card itself (covers all ID sources).
   const relationNameMap = useMemo(() => {
     const map = new Map<string, string>();
     if (!capabilityMapping) return map;
@@ -2610,10 +2622,15 @@ export default function TurboLensArchitect() {
                         const tgtCard = capabilityMapping.proposedCards.find(
                           (c) => c.id === rel.targetId,
                         );
+                        // Named after the node the diagram draws each end to.
                         const srcName =
-                          relationNameMap.get(rel.sourceId) ?? rel.sourceId;
+                          merged.nameOf(rel.sourceId) ??
+                          relationNameMap.get(rel.sourceId) ??
+                          rel.sourceId;
                         const tgtName =
-                          relationNameMap.get(rel.targetId) ?? rel.targetId;
+                          merged.nameOf(rel.targetId) ??
+                          relationNameMap.get(rel.targetId) ??
+                          rel.targetId;
                         const relDisabled =
                           srcCard?.disabled || tgtCard?.disabled;
                         return (
@@ -2745,9 +2762,13 @@ export default function TurboLensArchitect() {
             <Typography variant="body2" color="text.secondary">
               {runningPhase === 3
                 ? t("turbolens_architect_generating_options")
-                : archPhase < 3
-                  ? t("turbolens_architect_loading")
-                  : t("turbolens_architect_analyzing_gaps")}
+                : runningPhase === 4
+                  ? t("turbolens_architect_analyzing_deps")
+                  : runningPhase === 5
+                    ? t("turbolens_architect_analyzing_capabilities")
+                    : archPhase < 3
+                      ? t("turbolens_architect_loading")
+                      : t("turbolens_architect_analyzing_gaps")}
             </Typography>
           </Box>
         )}

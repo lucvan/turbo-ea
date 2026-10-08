@@ -9,8 +9,8 @@
  * the run to the real `useAnalysisPolling`, which reloads the matching list
  * when the run settles or surfaces its error.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 vi.mock("@/api/client", () => import("@/test/apiMock").then((m) => m.apiClientModule()));
@@ -20,6 +20,7 @@ import { mockApi } from "@/test/apiMock";
 import { hookState, withMetamodel } from "@/test/hooks";
 import { CARD_TYPES } from "@/test/fixtures/metamodel";
 import { renderWithProviders, wrapWithProviders } from "@/test/render";
+import i18n from "@/i18n";
 import type { TurboLensDuplicateCluster, TurboLensModernization } from "@/types";
 import TurboLensDuplicates from "./TurboLensDuplicates";
 
@@ -788,5 +789,50 @@ describe("TurboLensDuplicates — more cluster cases", () => {
     await user.click(screen.getByRole("button", { name: DETECT }));
     expect(await screen.findByText("CRM overlap")).toBeInTheDocument();
     expect(screen.queryByText(`GET ${CLUSTERS_URL} failed`)).not.toBeInTheDocument();
+  });
+});
+
+describe("TurboLensDuplicates — every counted opportunity is listed", () => {
+  afterEach(async () => {
+    await act(async () => {
+      await i18n.changeLanguage("en");
+    });
+  });
+
+  it("lists an opportunity whose priority is not one of the four, after the known groups", async () => {
+    mockApi.on("get", CLUSTERS_URL, []);
+    mockApi.on("get", MODS_URL, [
+      modernization({ id: "u1", card_name: "Mainframe", priority: "urgent", recommendation: "Escalate" }),
+      ...MODS,
+      modernization({ id: "u2", card_name: "Fax server", priority: "urgent", recommendation: "Switch off" }),
+      modernization({ id: "a1", card_name: "Wiki", priority: "asap", recommendation: "Migrate" }),
+    ]);
+    const { user } = renderTab();
+
+    await user.click(await screen.findByRole("tab", { name: "Modernization (8)" }));
+    expect(screen.getByRole("button", { name: "All (8)" })).toBeInTheDocument();
+    // Eight counted, eight listed.
+    expect(document.querySelectorAll(".MuiCard-root")).toHaveLength(8);
+    // The other priorities follow the known four, alphabetically.
+    const headers = screen.getAllByText(/^(CRITICAL|HIGH|MEDIUM|LOW|URGENT|ASAP)$/);
+    expect(headers.map((h) => h.textContent)).toEqual(["CRITICAL", "HIGH", "MEDIUM", "LOW", "ASAP", "URGENT"]);
+    const urgent = screen.getByText("URGENT").closest(".MuiBox-root") as HTMLElement;
+    expect(within(urgent).getByText("Escalate")).toBeInTheDocument();
+    expect(within(urgent).getByText("Switch off")).toBeInTheDocument();
+    expect(within(urgent).getByText("2 opportunities")).toBeInTheDocument();
+  });
+
+  it("counts each group's opportunities in the user's language", async () => {
+    mockApi.on("get", CLUSTERS_URL, []);
+    mockApi.on("get", MODS_URL, MODS);
+    const { user } = renderTab();
+
+    await user.click(await screen.findByRole("tab", { name: "Modernization (5)" }));
+    await act(async () => {
+      await i18n.changeLanguage("de");
+    });
+    expect(await screen.findAllByText("1 Möglichkeit")).toHaveLength(3);
+    expect(screen.getByText("2 Möglichkeiten")).toBeInTheDocument();
+    expect(screen.queryByText(/opportunit/)).not.toBeInTheDocument();
   });
 });

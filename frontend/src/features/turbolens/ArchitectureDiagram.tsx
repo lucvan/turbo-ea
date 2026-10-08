@@ -500,7 +500,13 @@ function buildArchFlow(
         direction: re.intg.direction,
       } satisfies ArchEdgeData,
       animated: false,
-      ...(swapped ? { markerStart: arrow } : { markerEnd: arrow }),
+      // A bidirectional integration points both ways; a one-way one only at
+      // its real target.
+      ...(re.intg.direction === "bidirectional"
+        ? { markerStart: arrow, markerEnd: arrow }
+        : swapped
+          ? { markerStart: arrow }
+          : { markerEnd: arrow }),
       zIndex: 2,
     };
   });

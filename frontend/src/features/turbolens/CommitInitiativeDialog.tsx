@@ -319,16 +319,14 @@ export default function CommitInitiativeDialog({
             </Typography>
             {resultData && (
               <Typography variant="body2" color="text.secondary">
-                {
-                  (resultData as Record<string, unknown>)
-                    .card_count as number
-                }{" "}
-                {t("turbolens_architect_proposed_cards").toLowerCase()},{" "}
-                {
-                  (resultData as Record<string, unknown>)
-                    .relation_count as number
-                }{" "}
-                {t("turbolens_architect_proposed_relations").toLowerCase()}
+                {t("turbolens_commit_result_summary", {
+                  cards: t("turbolens_commit_result_cards", {
+                    count: resultData.card_count as number,
+                  }),
+                  relations: t("turbolens_commit_result_relations", {
+                    count: resultData.relation_count as number,
+                  }),
+                })}
               </Typography>
             )}
             <Button

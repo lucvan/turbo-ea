@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router";
 import Alert from "@mui/material/Alert";
@@ -15,6 +15,7 @@ import MaterialSymbol from "@/components/MaterialSymbol";
 import { useMetamodel } from "@/hooks/useMetamodel";
 import { useCardSubtypeLabel } from "@/hooks/useCardSubtypeLabel";
 import { api } from "@/api/client";
+import { useAbortableEffect } from "@/hooks/useLatestRequest";
 import { usePageSubject } from "@/hooks/usePageTitle";
 import type {
   TurboLensAssessment,
@@ -144,15 +145,26 @@ export default function AssessmentViewer() {
   // null = no error; "" = the load failed with no message of its own.
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!id) return;
-    setLoading(true);
-    api
-      .get<TurboLensAssessment>(`/turbolens/assessments/${id}`)
-      .then(setAssessment)
-      .catch((err) => setError(err?.message || ""))
-      .finally(() => setLoading(false));
-  }, [id]);
+  // Keyed on the route's id: only the latest id's answer may land, and each
+  // id starts without the previous one's error.
+  useAbortableEffect(
+    async ({ signal, isCurrent }) => {
+      if (!id) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await api.get<TurboLensAssessment>(`/turbolens/assessments/${id}`, { signal });
+        if (isCurrent()) setAssessment(data);
+      } catch (err) {
+        // A superseded (or aborted) load owns none of the state.
+        if (!isCurrent()) return;
+        setError(err instanceof Error ? err.message : "");
+      } finally {
+        if (isCurrent()) setLoading(false);
+      }
+    },
+    [id],
+  );
 
   const sd = assessment?.session_data as Record<string, unknown> | null;
 

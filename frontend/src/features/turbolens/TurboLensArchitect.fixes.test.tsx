@@ -45,6 +45,8 @@ const P = {
   phase2: "/turbolens/architect/phase2",
   options: "/turbolens/architect/phase3/options",
   gaps: "/turbolens/architect/phase3/gaps",
+  deps: "/turbolens/architect/phase3/deps",
+  target: "/turbolens/architect/phase3",
   assessments: "/turbolens/assessments",
 };
 
@@ -254,5 +256,113 @@ describe("TurboLensArchitect — an assessment resumed from a link", () => {
     expect(await screen.findByRole("button", { name: /Assessment saved/ })).toBeDisabled();
     expect(mockApi.callsOf("patch").map((c) => c.path)).toEqual([`${P.assessments}/as-9`]);
     expect(mockApi.callsOf("post", P.assessments)).toHaveLength(0);
+  });
+});
+
+describe("TurboLensArchitect — the loading line of the later steps", () => {
+  const GAPS_LINE = "AI is analyzing gaps for the selected approach...";
+
+  it("says the dependencies are being analysed while Analyse Dependencies runs", async () => {
+    let answer: (v: unknown) => void = () => {};
+    mockApi.on("post", P.deps, () => new Promise((r) => (answer = r)));
+    const { user } = startAt(3.5, {
+      gapResult: { gaps: [{ capability: "Fraud Detection", recommendations: [{ name: "FraudShield" }] }] },
+      selectedRecs: ["0:0"],
+    });
+
+    await user.click(screen.getByRole("button", { name: /Analyse Dependencies/ }));
+    expect(await screen.findByText("AI is analyzing dependencies for the selected products...")).toBeInTheDocument();
+    expect(screen.queryByText(GAPS_LINE)).not.toBeInTheDocument();
+
+    await act(async () => answer({ dependencies: [] }));
+    expect(await screen.findByRole("button", { name: /Generate Target Architecture/ })).toBeEnabled();
+    expect(screen.queryByText("AI is analyzing dependencies for the selected products...")).not.toBeInTheDocument();
+  });
+
+  it("says the capabilities are being mapped while Generate Target Architecture runs", async () => {
+    let answer: (v: unknown) => void = () => {};
+    mockApi.on("post", P.target, () => new Promise((r) => (answer = r)));
+    const { user } = startAt(4);
+
+    await user.click(screen.getByRole("button", { name: /Generate Target Architecture/ }));
+    expect(await screen.findByText("AI is analyzing capabilities and dependencies...")).toBeInTheDocument();
+    expect(screen.queryByText(GAPS_LINE)).not.toBeInTheDocument();
+    expect(screen.queryByText("AI is analyzing dependencies for the selected products...")).not.toBeInTheDocument();
+
+    await act(async () => answer(MAPPING));
+    expect(await screen.findByTestId("ldv")).toBeInTheDocument();
+    expect(screen.queryByText("AI is analyzing capabilities and dependencies...")).not.toBeInTheDocument();
+  });
+});
+
+describe("TurboLensArchitect — naming a proposed relation's ends", () => {
+  /** The proposed-relations list's lines, as text. */
+  function relationLines(): (string | null)[] {
+    const heading = screen.getByText(/^Proposed New Relations/);
+    const rels = heading.closest(".MuiPaper-outlined") as HTMLElement;
+    return Array.from(rels.querySelectorAll(".MuiStack-root .MuiStack-root")).map((l) => l.textContent);
+  }
+
+  it("names each end after the node the diagram draws it to", () => {
+    // "pc-crm" stands for the landscape's "app-crm" under another name, and the
+    // capability "cap-1" stands for the landscape's "bc-1": the diagram draws a
+    // relation addressing "app-crm" to the proposal's node, and one addressing
+    // "cap-1" to the landscape's node.
+    startAt(5, {
+      capabilityMapping: {
+        capabilities: [
+          { id: "cap-1", name: "Customer Management", isNew: false, existingCardId: "bc-1" },
+          { id: "cap-new", name: "Lead Scoring", isNew: true },
+        ],
+        proposedCards: [
+          { id: "pc-crm", name: "CRM (proposed)", cardTypeKey: "Application", isNew: false, existingCardId: "app-crm" },
+        ],
+        proposedRelations: [
+          { sourceId: "app-crm", targetId: "cap-new", relationType: "relAppToBC" },
+          { sourceId: "pc-crm", targetId: "cap-1", relationType: "relAppToBC" },
+        ],
+        existingDependencies: {
+          nodes: [
+            { id: "app-crm", name: "Salesforce", type: "Application" },
+            { id: "bc-1", name: "Customer Mgmt (live)", type: "BusinessCapability" },
+          ],
+          edges: [],
+        },
+      },
+    });
+
+    const { nodes, edges } = lastLdv();
+    const drawnName = (id: string) => nodes.find((n) => n.id === id)?.name;
+    expect(edges.map((e) => [drawnName(e.source), drawnName(e.target)])).toEqual([
+      ["CRM (proposed)", "Lead Scoring"],
+      ["CRM (proposed)", "Customer Mgmt (live)"],
+    ]);
+    expect(relationLines()).toEqual([
+      "CRM (proposed)arrow_forwardLead Scoring",
+      "CRM (proposed)arrow_forwardCustomer Mgmt (live)",
+    ]);
+  });
+
+  it("names a switched-off card's end after the card itself, and an unknown end by its id", () => {
+    startAt(5, {
+      capabilityMapping: {
+        ...MAPPING,
+        proposedCards: [
+          ...MAPPING.proposedCards,
+          { id: "pc-off", name: "Switched Off", cardTypeKey: "Application", isNew: true, disabled: true },
+        ],
+        proposedRelations: [
+          { sourceId: "pc-off", targetId: "cap-new-1", relationType: "relAppToBC" },
+          { sourceId: "pc-1", targetId: "ghost", relationType: "relAppToITC" },
+        ],
+      },
+    });
+
+    // Neither relation is drawn.
+    expect(ldvProps.flatMap((p) => p.edges)).toEqual([]);
+    expect(relationLines()).toEqual([
+      "Switched Offarrow_forwardFraud Detection",
+      "FraudShieldarrow_forwardghost",
+    ]);
   });
 });

@@ -629,6 +629,85 @@ describe("AssessmentViewer — loading by route", () => {
     expect(await screen.findByRole("heading", { name: "Second assessment" })).toBeInTheDocument();
     expect(mockApi.callsOf("get").map((c) => c.path)).toEqual([URL_A1, "/turbolens/assessments/a-2"]);
   });
+
+  function Jump() {
+    const navigate = useNavigate();
+    return <button onClick={() => navigate("/turbolens/assessments/a-2")}>jump</button>;
+  }
+
+  function renderWithJump() {
+    return renderWithProviders(
+      <>
+        <AssessmentViewer />
+        <Jump />
+      </>,
+      { route: "/turbolens/assessments/a-1", routes: [{ path: "/turbolens/assessments/:id" }] },
+    );
+  }
+
+  it("drops a failed load's error once the route moves to an assessment that loads", async () => {
+    mockApi.fail("get", URL_A1, 404, "Not found");
+    mockApi.on("get", "/turbolens/assessments/a-2", assessment({ id: "a-2", title: "Second assessment" }));
+    const { user } = renderWithJump();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(`GET ${URL_A1} failed`);
+    await user.click(screen.getByRole("button", { name: "jump" }));
+    expect(await screen.findByRole("heading", { name: "Second assessment" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows the assessment the route names when the one it left answers last", async () => {
+    let answerFirst: (v: TurboLensAssessment) => void = () => {};
+    mockApi.on("get", URL_A1, () => new Promise<TurboLensAssessment>((r) => (answerFirst = r)));
+    mockApi.on("get", "/turbolens/assessments/a-2", assessment({ id: "a-2", title: "Second assessment" }));
+    const { user } = renderWithJump();
+
+    await waitFor(() => expect(mockApi.callsOf("get", URL_A1)).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: "jump" }));
+    expect(await screen.findByRole("heading", { name: "Second assessment" })).toBeInTheDocument();
+    // The request for the assessment it left was cancelled.
+    const [firstPath, firstOpts] = mockApi.api.get.mock.calls[0] as [string, { signal?: AbortSignal }?];
+    expect(firstPath).toBe(URL_A1);
+    expect(firstOpts?.signal?.aborted).toBe(true);
+
+    await act(async () => answerFirst(assessment()));
+    expect(screen.getByRole("heading", { name: "Second assessment" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "CRM replacement" })).not.toBeInTheDocument();
+  });
+
+  it("keeps loading while the assessment the route names is on its way, whatever the one it left does", async () => {
+    let answerFirst: (v: TurboLensAssessment) => void = () => {};
+    let answerSecond: (v: TurboLensAssessment) => void = () => {};
+    mockApi.on("get", URL_A1, () => new Promise<TurboLensAssessment>((r) => (answerFirst = r)));
+    mockApi.on("get", "/turbolens/assessments/a-2", () => new Promise<TurboLensAssessment>((r) => (answerSecond = r)));
+    const { user } = renderWithJump();
+
+    await waitFor(() => expect(mockApi.callsOf("get", URL_A1)).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: "jump" }));
+    await waitFor(() => expect(mockApi.callsOf("get", "/turbolens/assessments/a-2")).toHaveLength(1));
+
+    await act(async () => answerFirst(assessment()));
+    expect(screen.getByText("Loading...")).toBeInTheDocument();
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+
+    await act(async () => answerSecond(assessment({ id: "a-2", title: "Second assessment" })));
+    expect(await screen.findByRole("heading", { name: "Second assessment" })).toBeInTheDocument();
+  });
+
+  it("ignores a failure of the assessment it left", async () => {
+    let failFirst: (err: Error) => void = () => {};
+    mockApi.on("get", URL_A1, () => new Promise<TurboLensAssessment>((_, reject) => (failFirst = reject)));
+    mockApi.on("get", "/turbolens/assessments/a-2", assessment({ id: "a-2", title: "Second assessment" }));
+    const { user } = renderWithJump();
+
+    await waitFor(() => expect(mockApi.callsOf("get", URL_A1)).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: "jump" }));
+    expect(await screen.findByRole("heading", { name: "Second assessment" })).toBeInTheDocument();
+
+    await act(async () => failFirst(new Error("late failure")));
+    expect(screen.getByRole("heading", { name: "Second assessment" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });
 
 describe("AssessmentViewer — header states", () => {

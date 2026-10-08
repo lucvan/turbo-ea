@@ -217,7 +217,15 @@ export default function TurboLensDuplicates() {
     return groups;
   }, [filteredMods]);
 
-  const priorityOrder = ["critical", "high", "medium", "low"];
+  // The four known priorities first, then any other the AI returned, so
+  // every opportunity counted above is also listed.
+  const priorityOrder = useMemo(() => {
+    const known = ["critical", "high", "medium", "low"];
+    const others = Object.keys(modsByPriority)
+      .filter((p) => !known.includes(p))
+      .sort();
+    return [...known, ...others];
+  }, [modsByPriority]);
 
   return (
     <Box>
@@ -555,7 +563,7 @@ export default function TurboLensDuplicates() {
                         sx={{ fontWeight: 700 }}
                       />
                       <Typography variant="caption" color="text.secondary">
-                        {items.length} {items.length === 1 ? "opportunity" : "opportunities"}
+                        {t("turbolens_opportunity_count", { count: items.length })}
                       </Typography>
                     </Stack>
                     <Grid container spacing={2}>

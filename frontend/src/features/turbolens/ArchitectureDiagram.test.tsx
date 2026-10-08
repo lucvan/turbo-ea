@@ -310,6 +310,9 @@ describe("ArchitectureDiagram", () => {
     const replicaToBus = edgeOf("arch-2", "arch-4");
     expect(replicaToBus).toMatchObject({ sourceHandle: "r", targetHandle: "l" });
     expect(replicaToBus.data).toMatchObject({ label: "bidirectional" });
+    // A bidirectional integration points both ways.
+    expect(replicaToBus.markerStart).toEqual(ARROW);
+    expect(replicaToBus.markerEnd).toEqual(ARROW);
 
     expect(screen.getAllByTestId("edge-label").map((l) => l.textContent)).toEqual([
       "REST, async",
@@ -456,16 +459,43 @@ describe("ArchitectureDiagram — what React Flow is handed", () => {
     }
   });
 
-  it("draws every edge with one closed arrow at its integration's target, above the nodes, without animation", () => {
+  it("draws every edge with a closed arrow at its integration's target, at both ends when bidirectional, above the nodes, without animation", () => {
     renderDiagram();
     const edges = rf.props?.edges ?? [];
     expect(edges).toHaveLength(4);
     for (const e of edges) {
       expect(e).toMatchObject({ animated: false, zIndex: 2 });
-      expect([e.markerStart, e.markerEnd].filter(Boolean)).toEqual([ARROW]);
+      const arrows = (e.data as { direction?: string }).direction === "bidirectional" ? [ARROW, ARROW] : [ARROW];
+      expect([e.markerStart, e.markerEnd].filter(Boolean)).toEqual(arrows);
     }
-    // Only the integration written bottom → top has its arrowhead at the drawn start.
-    expect(edges.filter((e) => e.markerStart).map((e) => `${e.source}>${e.target}`)).toEqual(["arch-0>arch-4"]);
+    // Besides the bidirectional one, only the integration written bottom → top
+    // has its arrowhead at the drawn start.
+    expect(edges.filter((e) => e.markerStart).map((e) => `${e.source}>${e.target}`)).toEqual([
+      "arch-0>arch-4",
+      "arch-2>arch-4",
+    ]);
+  });
+
+  it("points a bidirectional integration both ways, whichever way round it was written", () => {
+    renderDiagram({
+      layers: [
+        { name: "Top", components: [{ name: "Portal", type: "new" }] },
+        { name: "Bottom", components: [{ name: "Ledger", type: "new" }, { name: "Archive", type: "new" }] },
+      ],
+      integrations: [
+        // Written bottom → top: drawn swapped.
+        { from: "Ledger", to: "Portal", direction: "bidirectional" },
+        // Same layer, written right to left: drawn swapped.
+        { from: "Archive", to: "Ledger", direction: "bidirectional" },
+        // One-way, written bottom → top: one arrow, on the real target.
+        { from: "Archive", to: "Portal", direction: "async" },
+      ],
+    });
+    const [ledgerPortal, archiveLedger, archivePortal] = rf.props?.edges ?? [];
+    expect(ledgerPortal).toMatchObject({ source: "arch-0", target: "arch-1", markerStart: ARROW, markerEnd: ARROW });
+    expect(archiveLedger).toMatchObject({ source: "arch-1", target: "arch-2", markerStart: ARROW, markerEnd: ARROW });
+    expect(archivePortal).toMatchObject({ source: "arch-0", target: "arch-2", markerStart: ARROW });
+    expect(archivePortal.markerEnd).toBeUndefined();
   });
 
   it("cycles the layer colours after the seventh layer", () => {
