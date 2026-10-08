@@ -180,6 +180,21 @@ describe("OverviewTab — loading and KPIs", () => {
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
 
+  it("shows a failed dashboard load as an error and stops the progress bar", async () => {
+    mockApi.fail("get", "/reports/dashboard", 500);
+    renderTab();
+    expect(await screen.findByRole("alert")).toHaveTextContent("GET /reports/dashboard failed");
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(screen.queryByText("Total Cards")).not.toBeInTheDocument();
+  });
+
+  it("falls back to a generic message when the dashboard fails without one", async () => {
+    mockApi.on("get", "/reports/dashboard", () => Promise.reject("offline"));
+    renderTab();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong");
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
   it("renders the four KPI tiles with their trend indicators", async () => {
     renderTab();
     await screen.findByText("Total Cards");

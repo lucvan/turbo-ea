@@ -116,6 +116,25 @@ describe("MyFavoritesSection", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows a failed favourites load as an error, not as the empty state", async () => {
+    mockApi.fail("get", "/favorites", 500);
+    const { user } = renderSection();
+    const alert = errorAlert(await screen.findByText("GET /favorites failed")) as HTMLElement;
+    expect(alert).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Browse the inventory and click the star to pin cards here."),
+    ).not.toBeInTheDocument();
+    expect(mockApi.callsOf("get", /^\/cards\//)).toHaveLength(0);
+
+    // Dismissing the error does not turn the failure into "nothing favourited".
+    await user.click(within(alert).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByText("GET /favorites failed")).not.toBeInTheDocument());
+    expect(
+      screen.queryByText("Browse the inventory and click the star to pin cards here."),
+    ).not.toBeInTheDocument();
+  });
+
   it("loads at most eight cards and drops any it can no longer read", async () => {
     const ids = Array.from({ length: 10 }, (_, i) => `k${i}`);
     mockApi.on("get", "/favorites", ids.map(favorite));

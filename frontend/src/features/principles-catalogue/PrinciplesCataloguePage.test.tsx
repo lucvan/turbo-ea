@@ -221,10 +221,32 @@ describe("PrinciplesCataloguePage — browsing", () => {
     const { user } = renderPage();
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("GET /principles-catalogue failed");
-    expect(screen.getByText("No principles match your search")).toBeInTheDocument();
-    expect(screen.getByText("Showing 0 of 0 — 0 not yet imported")).toBeInTheDocument();
+    // A catalogue that never arrived is not one where nothing matches.
+    expect(screen.queryByText(NO_MATCHES)).not.toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     await user.click(within(alert).getByRole("button", { name: "Close" }));
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    // Dismissing the error does not turn the failure into "no matches".
+    expect(screen.queryByText(NO_MATCHES)).not.toBeInTheDocument();
+  });
+
+  it("still says nothing matches a search after a failed reload, over the list it kept", async () => {
+    let gets = 0;
+    mockApi.on("get", "/principles-catalogue", () => {
+      gets += 1;
+      return gets === 2 ? Promise.reject(new Error("catalogue offline")) : PAYLOAD;
+    });
+    mockApi.on("post", "/principles-catalogue/import", { created: [], skipped: [], catalogue_version: null });
+    const { user } = renderPage();
+    await screen.findByText("Data is an Asset");
+    await importSelection(user, "Data is an Asset");
+    const done = await screen.findByRole("dialog", { name: "Import complete" });
+    expect(await screen.findByText("catalogue offline")).toBeInTheDocument();
+    await user.click(within(done).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    await user.type(screen.getByPlaceholderText("Search principles..."), "zzz");
+    expect(await screen.findByText(NO_MATCHES)).toBeInTheDocument();
   });
 });
 

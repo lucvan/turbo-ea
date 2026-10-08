@@ -349,12 +349,46 @@ describe("PpmCostTab — labels and empty states", () => {
     expect(screen.queryByText("No cost items yet")).not.toBeInTheDocument();
   });
 
-  it("starts with no budget lines while they are still loading", () => {
+  it("shows the budget lines loading, not an empty budget or a $0 total", () => {
     // The GET never settles: what shows is the state before any data lands.
     mockApi.on("get", budgetPath, () => new Promise(() => {}));
-    renderTab([]);
-    expect(screen.getByText("No budget lines yet")).toBeInTheDocument();
-    expect(kpi("Total Budget")).toBe("$0");
+    renderTab();
+    expect(screen.queryByText("No budget lines yet")).not.toBeInTheDocument();
+    const budgetTable = screen.getByRole("columnheader", { name: "Fiscal Year" }).closest("table") as HTMLElement;
+    expect(within(budgetTable).getByRole("progressbar")).toBeInTheDocument();
+    // Every figure that needs the budget waits for it; the actuals are known.
+    expect(kpi("Total Budget")).toBe("—");
+    expect(kpi("Variance")).toBe("—");
+    expect(kpi("Total Actual")).toBe("$550");
+    expect(kpi("CapEx")).toBe("$250 / —");
+    expect(kpi("OpEx")).toBe("$300 / —");
+    // An unknown variance is neither an overspend nor within budget.
+    const variance = screen.getByText("Variance", { selector: ".MuiTypography-caption" })
+      .nextElementSibling as HTMLElement;
+    expect(getComputedStyle(variance).color).not.toBe("rgb(211, 47, 47)"); // palette.error.main
+    expect(getComputedStyle(variance).color).not.toBe("rgb(46, 125, 50)"); // palette.success.main
+  });
+
+  it("drops the loading row once the budget lines have arrived", async () => {
+    renderTab();
+    await screen.findByText("FY 2025");
+    const budgetTable = screen.getByRole("columnheader", { name: "Fiscal Year" }).closest("table") as HTMLElement;
+    expect(within(budgetTable).queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
+  it("keeps the lines and totals on screen while it reloads them after a save", async () => {
+    const reload = deferred<PpmBudgetLine[]>();
+    let gets = 0;
+    mockApi.on("get", budgetPath, () => (++gets === 1 ? BUDGETS : reload.promise));
+    const { user } = renderTab();
+    await screen.findByText("FY 2025");
+    await user.click(screen.getByRole("button", { name: /Add Budget Line/ }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(gets).toBe(2));
+    expect(screen.getByText("FY 2025")).toBeInTheDocument();
+    expect(kpi("Total Budget")).toBe("$1400");
+    const budgetTable = screen.getByRole("columnheader", { name: "Fiscal Year" }).closest("table") as HTMLElement;
+    expect(within(budgetTable).queryByRole("progressbar")).not.toBeInTheDocument();
   });
 
   it("labels each cost item's category chip", async () => {
@@ -538,6 +572,9 @@ describe("PpmCostTab — loading the budget lines", () => {
     );
     expect(alert).toHaveStyle({ marginBottom: "16px" });
     expect(screen.queryByText("No budget lines yet")).not.toBeInTheDocument();
+    // Nor as a $0 budget, nor as still loading.
+    expect(kpi("Total Budget")).toBe("—");
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
 
   it("ignores a budget response for an initiative it has since left", async () => {
@@ -556,6 +593,70 @@ describe("PpmCostTab — loading the budget lines", () => {
     expect(screen.queryByText("FY 2025")).not.toBeInTheDocument();
     expect(screen.getByText("FY 2030")).toBeInTheDocument();
     expect(kpi("Total Budget")).toBe("$50");
+  });
+});
+
+describe("PpmCostTab — saving once", () => {
+  it("adds a budget line once however often Save is clicked, and locks Save meanwhile", async () => {
+    const write = deferred<object>();
+    mockApi.on("post", budgetPath, () => write.promise);
+    const { user } = renderTab();
+    await screen.findByText("FY 2025");
+    await user.click(screen.getByRole("button", { name: /Add Budget Line/ }));
+    const save = within(screen.getByRole("dialog")).getByRole("button", { name: "Save" });
+    // Both clicks land before the dialog re-renders.
+    act(() => {
+      save.click();
+      save.click();
+    });
+    expect(mockApi.callsOf("post", budgetPath)).toHaveLength(1);
+    expect(save).toBeDisabled();
+
+    write.resolve({});
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mockApi.callsOf("post", budgetPath)).toHaveLength(1);
+  });
+
+  it("adds a cost item once however often Save is clicked, and locks Save meanwhile", async () => {
+    const write = deferred<object>();
+    mockApi.on("post", costPath, () => write.promise);
+    const { user, onRefresh } = renderTab();
+    await screen.findByText("FY 2025");
+    await user.click(screen.getByRole("button", { name: /Add Cost Item/ }));
+    const save = within(screen.getByRole("dialog")).getByRole("button", { name: "Save" });
+    act(() => {
+      save.click();
+      save.click();
+    });
+    expect(mockApi.callsOf("post", costPath)).toHaveLength(1);
+    expect(save).toBeDisabled();
+
+    write.resolve({});
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mockApi.callsOf("post", costPath)).toHaveLength(1);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("unlocks Save after a failed save so the user can retry", async () => {
+    let posts = 0;
+    mockApi.on("post", budgetPath, () => (++posts === 1 ? Promise.reject(new Error("offline")) : {}));
+    mockApi.on("post", costPath, () => Promise.reject(new Error("offline")));
+    const { user } = renderTab();
+    await screen.findByText("FY 2025");
+    await user.click(screen.getByRole("button", { name: /Add Budget Line/ }));
+    const save = within(screen.getByRole("dialog")).getByRole("button", { name: "Save" });
+    await user.click(save);
+    expect(await within(screen.getByRole("dialog")).findByRole("alert")).toHaveTextContent("offline");
+    await waitFor(() => expect(save).toBeEnabled());
+    await user.click(save);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(posts).toBe(2);
+
+    await user.click(screen.getByRole("button", { name: /Add Cost Item/ }));
+    const saveCost = within(screen.getByRole("dialog")).getByRole("button", { name: "Save" });
+    await user.click(saveCost);
+    expect(await within(screen.getByRole("dialog")).findByRole("alert")).toHaveTextContent("offline");
+    await waitFor(() => expect(saveCost).toBeEnabled());
   });
 });
 

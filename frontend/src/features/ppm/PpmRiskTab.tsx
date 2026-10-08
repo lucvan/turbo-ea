@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Paper from "@mui/material/Paper";
@@ -28,6 +28,7 @@ import { useTranslation } from "react-i18next";
 import MaterialSymbol from "@/components/MaterialSymbol";
 import { api } from "@/api/client";
 import { useFullScreenDialog } from "@/hooks/useFullScreenDialog";
+import { RAG_COLORS } from "@/theme/tokens";
 import type { PpmRisk } from "@/types";
 
 interface UserOption {
@@ -37,9 +38,9 @@ interface UserOption {
 }
 
 function scoreColor(score: number): string {
-  if (score >= 15) return "#d32f2f";
-  if (score >= 6) return "#ed6c02";
-  return "#2e7d32";
+  if (score >= 15) return RAG_COLORS.red;
+  if (score >= 6) return RAG_COLORS.amber;
+  return RAG_COLORS.green;
 }
 
 const STATUS_COLORS: Record<string, "default" | "error" | "warning" | "success" | "info"> = {
@@ -66,6 +67,10 @@ export default function PpmRiskTab({ initiativeId, risks, onRefresh }: Props) {
   // A failed save, shown in the dialog; a failed delete, shown above the table.
   const [saveError, setSaveError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // The save is in flight: Save is disabled, and a second click that lands
+  // before that re-render is ignored.
+  const savingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -113,6 +118,9 @@ export default function PpmRiskTab({ initiativeId, risks, onRefresh }: Props) {
   };
 
   const handleSave = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
     const payload = {
       ...form,
       description: form.description || null,
@@ -127,6 +135,9 @@ export default function PpmRiskTab({ initiativeId, risks, onRefresh }: Props) {
     } catch (err) {
       setSaveError(errorText(err));
       return;
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
     setDialog({ open: false });
     onRefresh();
@@ -435,7 +446,7 @@ export default function PpmRiskTab({ initiativeId, risks, onRefresh }: Props) {
             <Button
               variant="contained"
               onClick={handleSave}
-              disabled={!form.title}
+              disabled={!form.title || saving}
             >
               {t("common:actions.save", "Save")}
             </Button>

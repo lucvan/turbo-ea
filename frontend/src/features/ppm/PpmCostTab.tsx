@@ -1,4 +1,4 @@
-import { useState, useMemo, lazy, Suspense } from "react";
+import { useState, useMemo, useRef, lazy, Suspense } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Paper from "@mui/material/Paper";
@@ -23,6 +23,7 @@ import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import Divider from "@mui/material/Divider";
+import LinearProgress from "@mui/material/LinearProgress";
 import { useTranslation } from "react-i18next";
 import { DateField } from "@/components/DateField";
 import MaterialSymbol from "@/components/MaterialSymbol";
@@ -61,10 +62,14 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
   // ── Budget lines (planned) ──
   const {
     data: loadedBudgetLines,
+    loading: budgetLoading,
     error: budgetLoadError,
     refetch: loadBudgets,
   } = useApiQuery<PpmBudgetLine[]>(`/ppm/initiatives/${initiativeId}/budgets`);
   const budgetLines = loadedBudgetLines ?? NO_BUDGET_LINES;
+  // Until the budget lines have arrived, a budget figure is unknown — never $0.
+  const budgetKnown = loadedBudgetLines !== undefined;
+  const budgetFigure = (n: number) => (budgetKnown ? fmt.format(n) : "\u2014");
   // A failed delete, shown above the table it failed in.
   const [budgetListError, setBudgetListError] = useState<string | null>(null);
   const [costListError, setCostListError] = useState<string | null>(null);
@@ -92,6 +97,20 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
     actual: 0,
     date: "",
   });
+  // A dialog's save is in flight: Save is disabled, and a second click that
+  // lands before that re-render is ignored. Only one dialog is open at a time.
+  const savingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const beginSave = () => {
+    if (savingRef.current) return false;
+    savingRef.current = true;
+    setSaving(true);
+    return true;
+  };
+  const endSave = () => {
+    savingRef.current = false;
+    setSaving(false);
+  };
 
   // ── KPIs ──
   const totalBudget = useMemo(
@@ -139,6 +158,7 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
   };
 
   const handleBudgetSave = async () => {
+    if (!beginSave()) return;
     try {
       if (budgetDialog.item) {
         await api.patch(`/ppm/budgets/${budgetDialog.item.id}`, budgetForm);
@@ -148,6 +168,8 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
     } catch (err) {
       setBudgetSaveError(errorText(err));
       return;
+    } finally {
+      endSave();
     }
     setBudgetDialog({ open: false });
     loadBudgets();
@@ -186,6 +208,7 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
   };
 
   const handleCostSave = async () => {
+    if (!beginSave()) return;
     const payload = {
       description: costForm.description,
       category: costForm.category,
@@ -201,6 +224,8 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
     } catch (err) {
       setCostSaveError(errorText(err));
       return;
+    } finally {
+      endSave();
     }
     setCostDialog({ open: false });
     onRefresh();
@@ -244,7 +269,7 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
             {t("totalBudget")}
           </Typography>
           <Typography variant="h6" fontWeight={600} sx={KPI_VALUE_SX}>
-            {fmt.format(totalBudget)}
+            {budgetFigure(totalBudget)}
           </Typography>
         </Box>
         <Box>
@@ -262,10 +287,10 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
           <Typography
             variant="h6"
             fontWeight={600}
-            color={totalActual > totalBudget ? "error" : "success.main"}
+            color={!budgetKnown ? undefined : totalActual > totalBudget ? "error" : "success.main"}
             sx={KPI_VALUE_SX}
           >
-            {fmt.format(totalBudget - totalActual)}
+            {budgetFigure(totalBudget - totalActual)}
           </Typography>
         </Box>
         <Box>
@@ -273,7 +298,7 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
             {t("capex")}
           </Typography>
           <Typography variant="body2" sx={{ overflowWrap: "anywhere" }}>
-            {fmt.format(capexActual)} / {fmt.format(capexBudget)}
+            {fmt.format(capexActual)} / {budgetFigure(capexBudget)}
           </Typography>
         </Box>
         <Box>
@@ -281,7 +306,7 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
             {t("opex")}
           </Typography>
           <Typography variant="body2" sx={{ overflowWrap: "anywhere" }}>
-            {fmt.format(opexActual)} / {fmt.format(opexBudget)}
+            {fmt.format(opexActual)} / {budgetFigure(opexBudget)}
           </Typography>
         </Box>
       </Paper>
@@ -362,7 +387,14 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
                 </TableCell>
               </TableRow>
             ))}
-            {budgetLines.length === 0 && !budgetLoadError && (
+            {!budgetKnown && budgetLoading && (
+              <TableRow>
+                <TableCell colSpan={4} sx={{ py: 2 }}>
+                  <LinearProgress />
+                </TableCell>
+              </TableRow>
+            )}
+            {budgetKnown && budgetLines.length === 0 && (
               <TableRow>
                 <TableCell colSpan={4} align="center" sx={{ py: 2 }}>
                   <Typography variant="body2" color="text.secondary">
@@ -531,7 +563,7 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
             <Button onClick={() => setBudgetDialog({ open: false })}>
               {t("common:actions.cancel", "Cancel")}
             </Button>
-            <Button variant="contained" onClick={handleBudgetSave}>
+            <Button variant="contained" onClick={handleBudgetSave} disabled={saving}>
               {t("common:actions.save", "Save")}
             </Button>
           </DialogActions>
@@ -607,7 +639,7 @@ export default function PpmCostTab({ initiativeId, costLines, onRefresh }: Props
             <Button onClick={() => setCostDialog({ open: false })}>
               {t("common:actions.cancel", "Cancel")}
             </Button>
-            <Button variant="contained" onClick={handleCostSave}>
+            <Button variant="contained" onClick={handleCostSave} disabled={saving}>
               {t("common:actions.save", "Save")}
             </Button>
           </DialogActions>

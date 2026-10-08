@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
+import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
@@ -56,9 +57,14 @@ export default function OverviewTab() {
   const readableTypes = useReadableCardTypes("module");
   const typeLabel = useTypeLabel();
   const [data, setData] = useState<DashboardData | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.get<DashboardData>("/reports/dashboard").then(setData);
+    api
+      .get<DashboardData>("/reports/dashboard")
+      .then(setData)
+      // An empty message falls back to the generic one when it renders.
+      .catch((err) => setError(err instanceof Error ? err.message : ""));
   }, []);
 
   const typeChartData = useMemo(() => {
@@ -110,6 +116,7 @@ export default function OverviewTab() {
     }));
   }, [data, lifecyclePhases]);
 
+  if (error !== null) return <Alert severity="error">{error || t("errors.generic")}</Alert>;
   if (!data) return <LinearProgress />;
 
   // A type the user may not see gets no tile — not even an empty one for the

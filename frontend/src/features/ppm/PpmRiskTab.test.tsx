@@ -12,6 +12,7 @@ import type { PpmRisk } from "@/types";
 vi.mock("@/api/client", () => import("@/test/apiMock").then((m) => m.apiClientModule()));
 
 import { mockApi } from "@/test/apiMock";
+import { RAG_COLORS } from "@/theme/tokens";
 import i18n from "@/i18n";
 import PpmRiskTab from "./PpmRiskTab";
 
@@ -102,9 +103,9 @@ describe("PpmRiskTab — summary and table", () => {
     renderTab();
     const chipOf = (title: string, score: string) =>
       within(rowOf(title)).getByText(score, { selector: ".MuiChip-label" }).closest(".MuiChip-root") as HTMLElement;
-    expect(chipOf("Vendor lock-in", "20")).toHaveStyle({ backgroundColor: "#d32f2f" });
-    expect(chipOf("Budget overrun", "9")).toHaveStyle({ backgroundColor: "#ed6c02" });
-    expect(chipOf("Late delivery", "2")).toHaveStyle({ backgroundColor: "#2e7d32" });
+    expect(chipOf("Vendor lock-in", "20")).toHaveStyle({ backgroundColor: RAG_COLORS.red });
+    expect(chipOf("Budget overrun", "9")).toHaveStyle({ backgroundColor: RAG_COLORS.amber });
+    expect(chipOf("Late delivery", "2")).toHaveStyle({ backgroundColor: RAG_COLORS.green });
   });
 
   it("truncates a long description and shows dashes for a missing owner or mitigation", () => {
@@ -243,8 +244,8 @@ describe("PpmRiskTab — labels and bands", () => {
     expect(kpi("High Risks")).toBe("1");
     const chipOf = (title: string, score: string) =>
       within(rowOf(title)).getByText(score, { selector: ".MuiChip-label" }).closest(".MuiChip-root") as HTMLElement;
-    expect(chipOf("Fifteen", "15")).toHaveStyle({ backgroundColor: "#d32f2f" });
-    expect(chipOf("Six", "6")).toHaveStyle({ backgroundColor: "#ed6c02" });
+    expect(chipOf("Fifteen", "15")).toHaveStyle({ backgroundColor: RAG_COLORS.red });
+    expect(chipOf("Six", "6")).toHaveStyle({ backgroundColor: RAG_COLORS.amber });
   });
 
   it("shows a description of exactly 80 characters in full", () => {
@@ -348,6 +349,56 @@ describe("PpmRiskTab — dialog form", () => {
         await i18n.changeLanguage("en");
       });
     }
+  });
+});
+
+describe("PpmRiskTab — saving once", () => {
+  /** A promise the test settles by hand. */
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    const promise = new Promise<T>((res) => {
+      resolve = res;
+    });
+    return { promise, resolve };
+  }
+
+  it("creates a risk once however often Save is clicked, and locks Save meanwhile", async () => {
+    const write = deferred<object>();
+    mockApi.on("post", createPath, () => write.promise);
+    const { user, onRefresh } = renderTab();
+    await user.click(screen.getByRole("button", { name: /Add Risk/ }));
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByRole("textbox", { name: "Risk Title" }), "Scope creep");
+    const save = within(dialog).getByRole("button", { name: "Save" });
+    // Both clicks land before the dialog re-renders.
+    act(() => {
+      save.click();
+      save.click();
+    });
+    expect(mockApi.callsOf("post", createPath)).toHaveLength(1);
+    expect(save).toBeDisabled();
+
+    write.resolve({});
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mockApi.callsOf("post", createPath)).toHaveLength(1);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("unlocks Save after a failed save so the user can retry", async () => {
+    let posts = 0;
+    mockApi.on("post", createPath, () => (++posts === 1 ? Promise.reject(new Error("offline")) : {}));
+    const { user, onRefresh } = renderTab();
+    await user.click(screen.getByRole("button", { name: /Add Risk/ }));
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByRole("textbox", { name: "Risk Title" }), "Scope creep");
+    const save = within(dialog).getByRole("button", { name: "Save" });
+    await user.click(save);
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("offline");
+    await waitFor(() => expect(save).toBeEnabled());
+    await user.click(save);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(posts).toBe(2);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 });
 

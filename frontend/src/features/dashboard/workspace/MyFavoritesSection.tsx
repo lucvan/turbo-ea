@@ -31,6 +31,8 @@ export default function MyFavoritesSection() {
   const [cards, setCards] = useState<CardType[]>([]);
   const [undoSnack, setUndoSnack] = useState<CardType | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Stays set after the alert is dismissed: a failed load is not "nothing favourited".
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -41,6 +43,9 @@ export default function MyFavoritesSection() {
         slice.map((f) => api.get<CardType>(`/cards/${f.card_id}`).catch(() => null)),
       );
       setCards(fetched.filter((c): c is CardType => c !== null));
+    } catch (err) {
+      setLoadFailed(true);
+      setError(err instanceof Error ? err.message : t("common:errors.generic"));
     } finally {
       setLoading(false);
     }
@@ -98,7 +103,7 @@ export default function MyFavoritesSection() {
       {loading ? (
         <LinearProgress />
       ) : cards.length === 0 ? (
-        <EmptyState message={t("common:dashboard.workspace.empty.favorites")} />
+        !loadFailed && <EmptyState message={t("common:dashboard.workspace.empty.favorites")} />
       ) : (
         <Box>
           {cards.map((card) => (

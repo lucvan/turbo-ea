@@ -238,7 +238,10 @@ export default function PrinciplesCataloguePage() {
         </Box>
       )}
 
-      {!loading && filtered.length === 0 && (
+      {/* No catalogue at all means the load failed, not that nothing matches —
+          even once its error has been dismissed. A failed reload keeps the
+          list it had, over which "no matches" stays true. */}
+      {!loading && payload && filtered.length === 0 && (
         <Box
           sx={{
             py: 6,

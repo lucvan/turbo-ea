@@ -373,14 +373,14 @@ export default function ExpandMenu({ target, onClose, onPick }: Props) {
 
           {/* ── Drill-Down (children) ─────────────────────────────── */}
           <Divider sx={{ my: 0.5 }} />
+          {/* The children are loaded before the sections render, so the list
+              here is final — even when the summary counted others (a child
+              archived or moved between the two requests). Count what is listed. */}
           <MenuSectionHeader
             icon="south"
             label={t("editor.expandMenu.drillDown")}
-            count={hierarchy?.children_count}
+            count={children.length}
           />
-          {/* The children are loaded before the sections render, so an empty
-              list here is final — even when the summary counted some (a
-              child archived or moved between the two requests). */}
           {hierarchy && children.length === 0 && (
             <Box sx={{ px: 2, py: 1, color: "text.disabled", fontSize: "0.8rem" }}>
               {t("editor.expandMenu.noChildren")}

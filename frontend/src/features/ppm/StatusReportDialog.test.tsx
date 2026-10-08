@@ -13,6 +13,7 @@ vi.mock("@/api/client", () => import("@/test/apiMock").then((m) => m.apiClientMo
 
 import { mockApi } from "@/test/apiMock";
 import { todayIsoDate } from "@/lib/dates";
+import { RAG_COLORS } from "@/theme/tokens";
 import i18n from "@/i18n";
 import StatusReportDialog from "./StatusReportDialog";
 
@@ -154,6 +155,17 @@ describe("StatusReportDialog — new report", () => {
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(mockApi.calls).toHaveLength(0);
+  });
+});
+
+describe("StatusReportDialog — RAG colours", () => {
+  it("fills each selected health in the theme's RAG colour", () => {
+    renderDialog(REPORT);
+    const button = (caption: string, name: string) =>
+      within(group(caption)).getByRole("button", { name });
+    expect(button("Scope", "On Track")).toHaveStyle({ backgroundColor: RAG_COLORS.green });
+    expect(button("Schedule", "At Risk")).toHaveStyle({ backgroundColor: RAG_COLORS.amber });
+    expect(button("Cost", "Off Track")).toHaveStyle({ backgroundColor: RAG_COLORS.red });
   });
 });
 

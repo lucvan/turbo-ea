@@ -353,6 +353,19 @@ describe("ExpandMenu loading and sections", () => {
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(screen.getByText("No children to drill into.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Drill into/ })).not.toBeInTheDocument();
+    // The header counts what is listed — nothing — not the summary's stale two.
+    expect(within(screen.getByText("Drill-Down")).queryByText("2")).not.toBeInTheDocument();
+  });
+
+  it("counts the children it lists in the Drill-Down header, not the summary's count", async () => {
+    // One of the two children the summary counted went away before the
+    // hierarchy call.
+    mockApi.on("get", HIERARCHY, { ancestors: [], children: [CHILDREN[0]], level: 1 });
+    renderMenu();
+    expect(await screen.findByText("Invoicing")).toBeInTheDocument();
+    const header = screen.getByText("Drill-Down");
+    expect(within(header).getByText("1")).toBeInTheDocument();
+    expect(within(header).queryByText("2")).not.toBeInTheDocument();
   });
 
   it("toggles a child from its row or its own checkbox", async () => {
