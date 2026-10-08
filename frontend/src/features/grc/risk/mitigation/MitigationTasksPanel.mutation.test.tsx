@@ -404,7 +404,7 @@ describe("MitigationTasksPanel — refused writes", () => {
     mockApi.on("get", "/risks/r1/mitigation-tasks", [OPEN, SCHEDULED]);
   });
 
-  it("shows why a new task was refused", async () => {
+  it("shows why a new task was refused inside the dialog, which stays open", async () => {
     mockApi.fail("post", "/risks/r1/mitigation-tasks", 422, "bad");
     const { user } = renderPanel();
     await screen.findByText("Review access rights");
@@ -412,18 +412,26 @@ describe("MitigationTasksPanel — refused writes", () => {
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByRole("textbox", { name: /^Title/ }), "Enable MFA");
     await user.click(within(dialog).getByRole("button", { name: "Create task" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("POST /risks/r1/mitigation-tasks failed");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "POST /risks/r1/mitigation-tasks failed",
+    );
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(within(dialog).getByRole("textbox", { name: /^Title/ })).toHaveValue("Enable MFA");
     expect(listCalls()).toHaveLength(1);
   });
 
-  it("shows why an edit was refused", async () => {
+  it("shows why an edit was refused inside the dialog, which stays open", async () => {
     mockApi.fail("patch", "/mitigation-tasks/t1", 409, "stale");
     const { user } = renderPanel();
     await screen.findByText("Review access rights");
     await user.click(button(rowOf("Review access rights"), "edit")!);
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("PATCH /mitigation-tasks/t1 failed");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "PATCH /mitigation-tasks/t1 failed",
+    );
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(listCalls()).toHaveLength(1);
   });
 
   it("shows why completing a cycle was refused, and closes the dialog either way", async () => {

@@ -189,27 +189,28 @@ export default function EaDeliveryReport() {
 
   const handleCreateArtefact = useCallback(
     (kind: ArtefactKind, initiativeId?: string) => {
-      const target = initiativeId && initiativeId !== UNLINKED_KEY ? initiativeId : "";
+      // Only a loaded initiative counts: a stale id (a deleted initiative still
+      // in the URL), the Unlinked bucket, or any id before the workspace has
+      // reported its initiatives is never handed on as a parent.
+      const init = initiatives.find((i) => i.id === initiativeId);
       if (kind === "soaw") {
-        handleCreateSoawForInitiative(target);
+        handleCreateSoawForInitiative(init?.id ?? "");
         return;
       }
       if (kind === "diagram") {
-        handleCreateDiagramForInitiative(target || undefined);
+        handleCreateDiagramForInitiative(init?.id);
         return;
       }
       if (kind === "adr") {
-        if (target) {
-          const init = dataRef.current?.initiatives.find((i) => i.id === target);
-          openAdrCreateDialog(
-            init ? [{ id: init.id, name: init.name, type: init.type }] : [],
-          );
-        } else {
-          openAdrCreateDialog([]);
-        }
+        openAdrCreateDialog(init ? [{ id: init.id, name: init.name, type: init.type }] : []);
       }
     },
-    [handleCreateSoawForInitiative, handleCreateDiagramForInitiative, openAdrCreateDialog],
+    [
+      initiatives,
+      handleCreateSoawForInitiative,
+      handleCreateDiagramForInitiative,
+      openAdrCreateDialog,
+    ],
   );
 
   // ── Render ─────────────────────────────────────────────────────────────

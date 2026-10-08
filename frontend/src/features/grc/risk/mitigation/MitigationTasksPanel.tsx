@@ -172,25 +172,20 @@ export default function MitigationTasksPanel({
     refresh();
   }, [refresh]);
 
+  // Create and edit let a failed write reach the dialog, which shows it and
+  // stays open so the user's input is not lost. `refresh` reports its own
+  // failure on the panel, so it never rejects into the dialog.
   const handleCreate = async (payload: MitigationTaskDialogPayload) => {
-    try {
-      await api.post(`/risks/${riskId}/mitigation-tasks`, payload);
-      await refresh();
-    } catch (e) {
-      showError(e);
-    }
+    await api.post(`/risks/${riskId}/mitigation-tasks`, payload);
+    await refresh();
   };
 
   const handleEdit = async (
     task: MitigationTask,
     payload: MitigationTaskDialogPayload,
   ) => {
-    try {
-      await api.patch(`/mitigation-tasks/${task.id}`, payload);
-      await refresh();
-    } catch (e) {
-      showError(e);
-    }
+    await api.patch(`/mitigation-tasks/${task.id}`, payload);
+    await refresh();
   };
 
   const handleDelete = async (task: MitigationTask) => {

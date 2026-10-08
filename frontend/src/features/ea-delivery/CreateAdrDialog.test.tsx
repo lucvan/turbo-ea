@@ -367,6 +367,83 @@ describe("CreateAdrDialog — a link fails after the decision was created", () =
     expect(linkCalls()).toEqual(["init-1", "card-1"]);
   });
 
+  it("hands the created decision to the parent on Cancel, so its list shows it", async () => {
+    failLinkOf("init-1", 1);
+    const { user, onCreated, onClose } = await createWithTwoCards();
+    await screen.findByRole("alert");
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCreated).toHaveBeenCalledTimes(1);
+    expect(onCreated.mock.calls[0][0]).toMatchObject({ id: "adr-9" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    // Nothing is created or linked again on the way out.
+    expect(mockApi.callsOf("post", "/adr")).toHaveLength(1);
+    expect(linkCalls()).toEqual(["init-1", "card-1"]);
+  });
+
+  it("hands the created decision to the parent when dismissed with Escape", async () => {
+    failLinkOf("card-1", 1);
+    const { user, onCreated, onClose } = await createWithTwoCards();
+    await screen.findByRole("alert");
+
+    await user.keyboard("{Escape}");
+    expect(onCreated).toHaveBeenCalledTimes(1);
+    expect(onCreated.mock.calls[0][0]).toMatchObject({ id: "adr-9" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports the decision once when cancelled while its links are still in flight", async () => {
+    let release!: () => void;
+    mockApi.on(
+      "post",
+      "/adr/adr-9/cards",
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ ok: true });
+        }),
+    );
+    const user = userEvent.setup();
+    const { onCreated, onClose } = renderDialog({ preLinkedCards: [INITIATIVE] });
+    await user.type(screen.getByLabelText("Decision title"), "Adopt event bus");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(linkCalls()).toEqual(["init-1"]));
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCreated).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    release();
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(2));
+    expect(onCreated).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports each decision when the dialog is reopened for another one", async () => {
+    const user = userEvent.setup();
+    const props = { onClose: vi.fn(), onCreated: vi.fn() };
+    const { rerender } = render(<CreateAdrDialog open {...props} />);
+    await user.type(screen.getByLabelText("Decision title"), "First");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(props.onCreated).toHaveBeenCalledTimes(1));
+
+    rerender(<CreateAdrDialog open={false} {...props} />);
+    rerender(<CreateAdrDialog open {...props} />);
+    await waitFor(() => expect(screen.getByLabelText("Decision title")).toHaveValue(""));
+    await user.type(screen.getByLabelText("Decision title"), "Second");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(props.onCreated).toHaveBeenCalledTimes(2));
+    expect(props.onCreated.mock.calls[1][0]).toMatchObject({ title: "Second" });
+  });
+
+  it("reports no decision on Cancel when the create itself failed", async () => {
+    mockApi.fail("post", "/adr", 500, "boom");
+    const { user, onCreated, onClose } = await createWithTwoCards();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Failed to create architecture decision");
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCreated).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("starts a fresh decision when it is reopened", async () => {
     failLinkOf("card-1", 1);
     const user = userEvent.setup();

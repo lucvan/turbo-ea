@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 
 vi.mock("@/hooks/useMetamodel", () => import("@/test/hooks").then((m) => m.useMetamodelModule()));
 vi.mock("@/components/CardDetailSidePanel", () => ({
@@ -21,9 +21,17 @@ vi.mock("@/components/CardDetailSidePanel", () => ({
     ) : null,
 }));
 
+import i18n from "@/i18n";
 import { hookState, withMetamodel } from "@/test/hooks";
 import { renderWithProviders } from "@/test/render";
-import { makeCard, makeCardType, makeSubtype } from "@/test/fixtures/metamodel";
+import {
+  makeCard,
+  makeCardType,
+  makeField,
+  makeOption,
+  makeSection,
+  makeSubtype,
+} from "@/test/fixtures/metamodel";
 import type { ArchitectureDecision, Card, DiagramSummary, SoAW } from "@/types";
 import InitiativeWorkspace from "./InitiativeWorkspace";
 import type { InitiativeTreeNode } from "./useInitiativeData";
@@ -233,5 +241,71 @@ describe("InitiativeWorkspace", () => {
     });
     renderWorkspace({ kind: "initiative", node: node(card) });
     expect(screen.getByText(label)).toBeInTheDocument();
+  });
+});
+
+describe("InitiativeWorkspace — the status chip is labelled from the metamodel", () => {
+  /** An Initiative type whose status field an admin has customised. */
+  const STATUS_TYPE = makeCardType({
+    ...INITIATIVE_TYPE,
+    fields_schema: [
+      makeSection({ section: "Details", fields: [makeField({ key: "budget" })] }),
+      makeSection({
+        section: "Initiative Information",
+        fields: [
+          makeField({
+            key: "initiativeStatus",
+            label: "Status",
+            type: "single_select",
+            options: [
+              makeOption({ key: "onTrack", label: "Green" }),
+              makeOption({
+                key: "paused",
+                label: "Paused by board",
+                translations: { de: "Vom Vorstand pausiert" },
+              }),
+            ],
+          }),
+        ],
+      }),
+    ],
+  });
+  const withStatus = (status: string) =>
+    makeCard({ id: "init-9", type: "Initiative", name: "Status probe", attributes: { initiativeStatus: status } });
+
+  it("names a custom status by its option label, never by its key", () => {
+    withMetamodel([STATUS_TYPE]);
+    renderWorkspace({ kind: "initiative", node: node(withStatus("paused")) });
+    expect(screen.getByText("Paused by board")).toBeInTheDocument();
+    expect(screen.queryByText("paused")).not.toBeInTheDocument();
+  });
+
+  it("prefers the admin's label for a built-in status over the bundled wording", () => {
+    withMetamodel([STATUS_TYPE]);
+    renderWorkspace({ kind: "initiative", node: node(withStatus("onTrack")) });
+    expect(screen.getByText("Green")).toBeInTheDocument();
+    expect(screen.queryByText("On Track")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the bundled wording for a built-in status the metamodel lacks", () => {
+    withMetamodel([STATUS_TYPE]);
+    renderWorkspace({ kind: "initiative", node: node(withStatus("completed")) });
+    expect(screen.getByText("Completed")).toBeInTheDocument();
+  });
+
+  it("translates the option label into the user's language", async () => {
+    withMetamodel([STATUS_TYPE]);
+    try {
+      await act(async () => {
+        await i18n.changeLanguage("de");
+      });
+      renderWorkspace({ kind: "initiative", node: node(withStatus("paused")) });
+      expect(screen.getByText("Vom Vorstand pausiert")).toBeInTheDocument();
+    } finally {
+      await act(async () => {
+        await i18n.changeLanguage("en");
+      });
+      localStorage.clear();
+    }
   });
 });

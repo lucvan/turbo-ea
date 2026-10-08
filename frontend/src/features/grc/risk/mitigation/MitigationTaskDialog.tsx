@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DateField } from "@/components/DateField";
+import Alert from "@mui/material/Alert";
 import Autocomplete from "@mui/material/Autocomplete";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -75,6 +76,9 @@ export default function MitigationTaskDialog({
   // unit/interval; once they touch it explicitly, we stop overwriting.
   const [leadTimeDirty, setLeadTimeDirty] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // A failed save keeps the dialog open with the reason shown here, so what
+  // the user typed is not lost.
+  const [error, setError] = useState<string | null>(null);
   // The parent clears `task` in the same render that closes the dialog, so
   // the title and the submit label follow the task the dialog was last open
   // for — otherwise they flip to the create wording while it fades out.
@@ -84,6 +88,7 @@ export default function MitigationTaskDialog({
   // Sync local form state when the dialog opens for a different task.
   useEffect(() => {
     if (!open) return;
+    setError(null);
     if (task) {
       setTitle(task.title);
       setDescription(task.description ?? "");
@@ -140,6 +145,7 @@ export default function MitigationTaskDialog({
   const handleSubmit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
+    setError(null);
     try {
       await onSubmit({
         title: title.trim(),
@@ -155,6 +161,8 @@ export default function MitigationTaskDialog({
         lead_time_days: recurring ? Math.max(0, leadTimeDays) : 0,
       });
       onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("common:errors.generic"));
     } finally {
       setSubmitting(false);
     }
@@ -173,6 +181,11 @@ export default function MitigationTaskDialog({
       </DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
+          {error && (
+            <Alert severity="error" onClose={() => setError(null)}>
+              {error}
+            </Alert>
+          )}
           <TextField
             label={t("risks.tasks.field.title")}
             value={title}

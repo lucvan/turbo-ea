@@ -1,11 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 vi.mock("@/hooks/useMetamodel", () => import("@/test/hooks").then((m) => m.useMetamodelModule()));
 
+import i18n from "@/i18n";
 import { hookState, withMetamodel } from "@/test/hooks";
-import { makeCard, makeCardType, makeSubtype } from "@/test/fixtures/metamodel";
+import {
+  makeCard,
+  makeCardType,
+  makeField,
+  makeOption,
+  makeSection,
+  makeSubtype,
+} from "@/test/fixtures/metamodel";
 import type { Card, DiagramSummary, SoAW } from "@/types";
 import InitiativeTreeSidebar, { UNLINKED_KEY } from "./InitiativeTreeSidebar";
 import type { InitiativeTreeNode } from "./useInitiativeData";
@@ -136,6 +144,64 @@ describe("InitiativeTreeSidebar", () => {
     expect(rowOf("Cloud Migration")).not.toHaveAttribute("aria-current");
   });
 
+  it("lets every row be reached by keyboard and selected with Enter or Space", async () => {
+    const user = userEvent.setup();
+    const { onSelect } = renderSidebar({ selectedId: "init-2", unlinkedCount: 1 });
+
+    const programme = screen.getByRole("button", { name: "Cloud Migration" });
+    const child = screen.getByRole("button", { name: "Lift and shift" });
+    const unlinked = screen.getByRole("button", { name: "Unlinked artefacts" });
+    for (const row of [programme, child, unlinked]) expect(row).toHaveAttribute("tabindex", "0");
+    // The current row keeps saying so.
+    expect(child).toHaveAttribute("aria-current", "true");
+    expect(programme).not.toHaveAttribute("aria-current");
+
+    programme.focus();
+    expect(programme).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(onSelect).toHaveBeenLastCalledWith("init-1");
+
+    child.focus();
+    await user.keyboard(" ");
+    expect(onSelect).toHaveBeenLastCalledWith("init-2");
+
+    unlinked.focus();
+    await user.keyboard("{Enter}");
+    expect(onSelect).toHaveBeenLastCalledWith(UNLINKED_KEY);
+    expect(onSelect).toHaveBeenCalledTimes(3);
+
+    // Other keys do nothing.
+    await user.keyboard("a");
+    expect(onSelect).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps Space from scrolling the list when it selects a row", () => {
+    renderSidebar({ unlinkedCount: 1 });
+    // fireEvent returns false when the handler prevented the default action.
+    expect(fireEvent.keyDown(screen.getByRole("button", { name: "Cloud Migration" }), { key: " " })).toBe(
+      false,
+    );
+    expect(fireEvent.keyDown(screen.getByRole("button", { name: "Unlinked artefacts" }), { key: " " })).toBe(
+      false,
+    );
+    expect(fireEvent.keyDown(screen.getByRole("button", { name: "Cloud Migration" }), { key: "a" })).toBe(true);
+  });
+
+  it("leaves Enter on the star and the chevron to those buttons, not the row", async () => {
+    const user = userEvent.setup();
+    const { onSelect, onToggleFavorite } = renderSidebar();
+
+    screen.getAllByRole("button", { name: "cards_star" })[0].focus();
+    await user.keyboard("{Enter}");
+    expect(onToggleFavorite).toHaveBeenCalledWith("init-1");
+
+    screen.getByRole("button", { name: "expand_more" }).focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("button", { name: "chevron_right" })).toBeInTheDocument();
+    expect(screen.queryByText("Lift and shift")).not.toBeInTheDocument();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
   it("selects on row click, toggles a favourite without selecting, and collapses a branch", async () => {
     const user = userEvent.setup();
     const { onSelect, onToggleFavorite } = renderSidebar({ selectedId: "init-1" });
@@ -245,5 +311,93 @@ describe("InitiativeTreeSidebar", () => {
       ".MuiInputBase-root",
     ) as HTMLElement;
     expect(within(field).getByText("search")).toBeInTheDocument();
+  });
+});
+
+describe("InitiativeTreeSidebar — status labels come from the metamodel", () => {
+  /** An Initiative type whose status field an admin has customised. */
+  const STATUS_TYPE = makeCardType({
+    ...INITIATIVE_TYPE,
+    fields_schema: [
+      makeSection({ section: "Details", fields: [makeField({ key: "budget" })] }),
+      makeSection({
+        section: "Initiative Information",
+        fields: [
+          makeField({
+            key: "initiativeStatus",
+            label: "Status",
+            type: "single_select",
+            options: [
+              makeOption({ key: "atRisk", label: "Needs attention" }),
+              makeOption({
+                key: "paused",
+                label: "Paused by board",
+                translations: { de: "Vom Vorstand pausiert" },
+              }),
+            ],
+          }),
+        ],
+      }),
+    ],
+  });
+  /** Another type carrying a field of the same key, which must not be consulted. */
+  const DECOY_TYPE = makeCardType({
+    key: "Application",
+    fields_schema: [
+      makeSection({
+        fields: [
+          makeField({
+            key: "initiativeStatus",
+            type: "single_select",
+            options: [makeOption({ key: "paused", label: "Decoy label" })],
+          }),
+        ],
+      }),
+    ],
+  });
+  const PAUSED = makeCard({
+    id: "init-5",
+    type: "Initiative",
+    name: "Paused one",
+    attributes: { initiativeStatus: "paused" },
+  });
+  const ON_HOLD = makeCard({
+    id: "init-6",
+    type: "Initiative",
+    name: "Held one",
+    attributes: { initiativeStatus: "onHold" },
+  });
+
+  it("names a custom status by its option label, never by its key", () => {
+    withMetamodel([DECOY_TYPE, STATUS_TYPE]);
+    renderSidebar({ tree: [node(PAUSED), node(PROGRAM)], totalCount: 2 });
+    expect(screen.getByLabelText("Paused by board")).toBeInTheDocument();
+    expect(screen.queryByLabelText("paused")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Decoy label")).not.toBeInTheDocument();
+    // An admin's own label for a built-in status wins over the bundled wording.
+    expect(screen.getByLabelText("Needs attention")).toBeInTheDocument();
+    expect(screen.queryByLabelText("At Risk")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the bundled wording for a built-in status the metamodel lacks", () => {
+    withMetamodel([STATUS_TYPE]);
+    renderSidebar({ tree: [node(ON_HOLD)], totalCount: 1 });
+    expect(screen.getByLabelText("On Hold")).toBeInTheDocument();
+  });
+
+  it("translates the option label into the user's language", async () => {
+    withMetamodel([STATUS_TYPE]);
+    try {
+      await act(async () => {
+        await i18n.changeLanguage("de");
+      });
+      renderSidebar({ tree: [node(PAUSED)], totalCount: 1 });
+      expect(screen.getByLabelText("Vom Vorstand pausiert")).toBeInTheDocument();
+    } finally {
+      await act(async () => {
+        await i18n.changeLanguage("en");
+      });
+      localStorage.clear();
+    }
   });
 });

@@ -162,7 +162,7 @@ describe("MitigationTasksPanel — failed writes that are not API errors", () =>
     mockApi.on("get", "/risks/r1/mitigation-tasks", [OPEN, SCHEDULED]);
   });
 
-  it("shows why a new task could not be created", async () => {
+  it("shows why a new task could not be created inside the dialog, which stays open", async () => {
     mockApi.on("post", "/risks/r1/mitigation-tasks", offline());
     const { user } = renderPanel();
     await screen.findByText("Review access rights");
@@ -170,17 +170,43 @@ describe("MitigationTasksPanel — failed writes that are not API errors", () =>
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByRole("textbox", { name: /^Title/ }), "Enable MFA");
     await user.click(within(dialog).getByRole("button", { name: "Create task" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Failed to fetch");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Failed to fetch");
+    // The typed input survives, and the panel does not repeat the error.
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(within(dialog).getByRole("textbox", { name: /^Title/ })).toHaveValue("Enable MFA");
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
   });
 
-  it("shows why an edit could not be saved", async () => {
+  it("shows why an edit could not be saved inside the dialog, which stays open", async () => {
     mockApi.on("patch", "/mitigation-tasks/t1", throwsString());
     const { user } = renderPanel();
     await screen.findByText("Review access rights");
     await user.click(button(rowOf("Review access rights"), "edit"));
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Something went wrong");
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(within(dialog).getByRole("textbox", { name: /^Title/ })).toHaveValue("Review access rights");
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("closes the dialog once a create lands, and shows a failed reload on the panel", async () => {
+    let reloads = 0;
+    mockApi.on("get", "/risks/r1/mitigation-tasks", () => {
+      reloads += 1;
+      if (reloads > 1) throw new TypeError("Failed to fetch");
+      return [OPEN, SCHEDULED];
+    });
+    mockApi.on("post", "/risks/r1/mitigation-tasks", {});
+    const { user } = renderPanel();
+    await screen.findByText("Review access rights");
+    await user.click(screen.getByRole("button", { name: /Add task/ }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByRole("textbox", { name: /^Title/ }), "Enable MFA");
+    await user.click(within(dialog).getByRole("button", { name: "Create task" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(await screen.findByRole("alert")).toHaveTextContent("Failed to fetch");
+    expect(mockApi.callsOf("post", "/risks/r1/mitigation-tasks")).toHaveLength(1);
   });
 
   it("shows why a delete failed", async () => {
