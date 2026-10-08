@@ -5,6 +5,39 @@ All notable changes to Turbo EA are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.157.5] - 2026-10-08
+
+### Fixed
+- Pages across the app that hid a failed load or save behind an empty state ("No todos found", "Run an analysis", "No budget lines yet") or a spinner that never ended now say what failed, on card detail, the admin pages, GRC, EA Delivery, PPM, TurboLens, the reports, the process flow and navigator, the dashboard and public portals.
+- Dialogs that failed to save (mitigation tasks, PPM budgets, costs, risks and status reports, tags, decisions) stay open with the reason and what was typed, instead of closing as if they had saved.
+- Clicking Save, Sign, Duplicate, New revision, Next or Enter twice no longer sends the request twice. That second request used to create a duplicate decision, SoAW, survey or PPM line, or skip a Survey Builder step.
+- Switching to another card, initiative, survey, assessment or portal no longer shows data from the previous one while the new one loads, and a late reply for the one left behind can no longer replace it.
+- Card detail: a supported EOL cycle no longer reads "Yes (EOL)" in red. The approval-blocked list names relation types by their verb, from the side the card is on. A failed logo or subtype save shows its error beside the card instead of replacing the page.
+- Create card: what was typed stays while the dialog closes. An EOL search that failed or has not run yet no longer reads "No EOL matches found". An AI suggestion for an earlier type or session no longer lands in the form.
+- Provider field: relinking a card to another Provider keeps its current Provider if the new link fails.
+- Extensions: the license dialog opens empty each time, a discarded install stays discarded, and a purchase confirmed past the apply gate applies the license it was blocked on.
+- Survey Builder: a reopened draft keeps its "Via relation" narrowing, and a draft whose card type was removed says so instead of showing a blank select.
+- Todos: two quick toggles no longer undo each other.
+- Favourites: a failed removal no longer dismisses the Undo of another removed card.
+- Decisions: the From / To date filters include the whole of both days.
+- Initiative tree: rows can be reached and selected with the keyboard, and a custom status shows its own label and colour.
+- PPM: the Description label is translated, budget figures read "—" rather than $0 while they load, and the spend charts wait for the budget.
+- TurboLens: an integration drawn right to left keeps its arrowhead on its real target. A bidirectional one has arrowheads at both ends. Every counted modernization opportunity is listed.
+- TurboLens Architect: a question with no usable options can be answered in free text, so the round can always be submitted.
+- Portfolio report: grouping by a relation type lists each card only under the cards it reaches through that type. AI insights read lifecycle phases at the travelled date. A saved relation-subtype filter survives opening the report.
+- Capability map: a restored metric the map no longer offers falls back to the application count. A heatmap of all-negative values is scaled from its real range. The relation filter only matches the card type picked.
+- Matrix report: a saved report opens with its sorts, depths, filters and scopes, and Transpose keeps both scopes.
+- Lifecycle report: a saved date range is restored, and the Type column shows and sorts by the type's label.
+- EOL report: a card without EOL data is named by itself, never "null null".
+- EOL report: dates follow the workspace date format.
+- Cost report: a saved cost field and cost sources are restored, and the tooltip shows its "% of total" figure again.
+- Process map: a cost stored as text no longer makes the map fail to load, and processes in a looping parent chain stay on the map.
+- Process navigator: an `?open=` link opens its process once the map has loaded.
+- Public portals: counts no longer pluralise a type name by appending "s" ("Business Capabilitys"), and changing a portal's slug no longer runs the old slug's sign-in.
+- Diagram expand menu: switching to another card starts with no ticks and none of the previous card's children.
+- App layout: a nav group stays highlighted on a sub-page of one of its entries, and the extension-license banner disappears when the user loses the permission.
+- Missing translations: the Description label, the TurboLens diagram badges, the EOL report tooltips, the portal fallback words and several plurals now appear in every supported language. French now says « fiche », not « carte ».
+
 ## [2.157.4] - 2026-10-08
 
 ### Security
