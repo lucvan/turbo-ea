@@ -218,6 +218,19 @@ Each of these was found the hard way while wiring it up; keep them.
   silently ignored, so a suite that pins a timezone fails Stryker's initial
   run and aborts it. `frontend/vitest.stryker.config.ts` finds those suites
   by scanning for the stub and leaves them out of mutation runs only.
+- **A test that fails only in Stryker's initial run has a race the slower
+  run exposed.** The mutated files are instrumented, so everything that
+  renders them is slower, and a window a normal run never hits opens up.
+  Read the assertion message before deciding the cause: `Unable to find an
+  element …` is a wait that ran out, while `element could not be found in
+  the document` means an element was found and then removed, i.e. something
+  remounted it. Reproduce with `make mutation-frontend FILE=<the mutated
+  file>`, which runs the same related tests the same way, then fix the race
+  (in the product if the product remounts, in the test if the test reads
+  too early). Raising a timeout fixes neither, and the test is never
+  excluded to get past it. Three ADREditor runs failed this way: the editor
+  rendered its confirmation toast inside both its loading branch and its
+  loaded page, so navigating to a new decision remounted it.
 - **Static mutants are ignored** (`ignoreStatic`). A mutant in a module-level
   initialiser (`ROUTE_PERMISSIONS`, a lookup table, a constant) runs once at
   import, so Stryker cannot tell which tests cover it and reruns the whole

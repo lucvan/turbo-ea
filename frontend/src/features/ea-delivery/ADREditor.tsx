@@ -404,22 +404,41 @@ export default function ADREditor() {
   );
   const signedCount = signatories.filter((s) => s.status === "signed").length;
 
+  // Save (on a new decision), Duplicate and New Revision navigate to another
+  // decision and confirm in the same breath, so the page goes from the old
+  // decision to the spinner to the new one while the confirmation shows. Both
+  // returns below are the same two-slot fragment with the toast second, so it
+  // is ONE toast throughout: rendered inside each branch, it was remounted at
+  // every switch, re-animating and restarting its timer.
+  const snackbarEl = (
+    <Snackbar
+      open={!!snackbar}
+      autoHideDuration={3000}
+      onClose={() => setSnackbar("")}
+      message={snackbar}
+    />
+  );
+
   if (loading) {
     return (
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          minHeight: 300,
-        }}
-      >
-        <CircularProgress />
-      </Box>
+      <>
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            minHeight: 300,
+          }}
+        >
+          <CircularProgress />
+        </Box>
+        {snackbarEl}
+      </>
     );
   }
 
   return (
+    <>
     <Box sx={{ maxWidth: 900, mx: "auto", p: 2 }}>
       {/* ── Header ── */}
       <Box
@@ -952,13 +971,9 @@ export default function ADREditor() {
         </DialogActions>
       </Dialog>
 
-      {/* ── Snackbar ── */}
-      <Snackbar
-        open={!!snackbar}
-        autoHideDuration={3000}
-        onClose={() => setSnackbar("")}
-        message={snackbar}
-      />
     </Box>
+    {/* ── Snackbar ── */}
+    {snackbarEl}
+    </>
   );
 }
