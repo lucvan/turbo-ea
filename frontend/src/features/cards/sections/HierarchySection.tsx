@@ -259,9 +259,14 @@ function HierarchySection({
   };
 
   const handleRemoveParent = async () => {
-    await api.patch(`/cards/${card.id}`, { parent_id: null });
-    loadHierarchy();
-    onUpdate();
+    try {
+      setHierarchyError("");
+      await api.patch(`/cards/${card.id}`, { parent_id: null });
+      loadHierarchy();
+      onUpdate();
+    } catch (err: unknown) {
+      setHierarchyError(err instanceof Error ? err.message : t("common:errors.generic"));
+    }
   };
 
   const handleAddChild = async () => {
@@ -279,8 +284,13 @@ function HierarchySection({
   };
 
   const handleRemoveChild = async (childId: string) => {
-    await api.patch(`/cards/${childId}`, { parent_id: null });
-    loadHierarchy();
+    try {
+      setHierarchyError("");
+      await api.patch(`/cards/${childId}`, { parent_id: null });
+      loadHierarchy();
+    } catch (err: unknown) {
+      setHierarchyError(err instanceof Error ? err.message : t("common:errors.generic"));
+    }
   };
 
   // The link label is set on the CHILD of each edge, so the parent line patches
@@ -499,7 +509,7 @@ function HierarchySection({
                 )}
               </DialogContent>
               <DialogActions>
-                <Button onClick={() => { setPickingParent(false); setCreateMode(null); }}>{t("common:actions.cancel")}</Button>
+                <Button onClick={() => { setPickingParent(false); setCreateMode(null); setHierarchyError(""); }}>{t("common:actions.cancel")}</Button>
                 {!createMode && (
                   <Button variant="contained" onClick={handleSetParent} disabled={!selectedParent}>
                     {t("hierarchy.setParent")}
@@ -636,7 +646,7 @@ function HierarchySection({
                 )}
               </DialogContent>
               <DialogActions>
-                <Button onClick={() => { setAddChildOpen(false); setCreateMode(null); }}>{t("common:actions.cancel")}</Button>
+                <Button onClick={() => { setAddChildOpen(false); setCreateMode(null); setHierarchyError(""); }}>{t("common:actions.cancel")}</Button>
                 {createMode !== "child" && (
                   <Button variant="contained" onClick={handleAddChild} disabled={!selectedChild}>
                     {t("hierarchy.addChild")}

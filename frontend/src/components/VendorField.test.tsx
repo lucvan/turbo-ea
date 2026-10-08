@@ -559,6 +559,34 @@ describe("VendorField", () => {
     expect(mockApi.callsOf("post")).toHaveLength(0);
   });
 
+  it("forgets the pending Provider on Cancel, so a stray click on the closing dialog creates nothing", async () => {
+    mockApi.on("post", "/cards", { id: "prov-new", name: "Initech" });
+    const { user, onProviderSelected } = renderField();
+    await user.type(screen.getByLabelText("Provider"), "Initech");
+    await user.click(await screen.findByRole("option", { name: /Create Provider "Initech"/ }));
+    const dialog = await screen.findByRole("dialog");
+    const createButton = within(dialog).getByRole("button", { name: "Create & Link" });
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    // The dialog is still fading out: its button is on screen but must be inert.
+    fireEvent.click(createButton);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mockApi.callsOf("post")).toHaveLength(0);
+    expect(onProviderSelected).not.toHaveBeenCalled();
+  });
+
+  it("forgets the pending Provider on Escape too", async () => {
+    mockApi.on("post", "/cards", { id: "prov-new", name: "Initech" });
+    const { user } = renderField();
+    await user.type(screen.getByLabelText("Provider"), "Initech");
+    await user.click(await screen.findByRole("option", { name: /Create Provider "Initech"/ }));
+    const dialog = await screen.findByRole("dialog");
+    const createButton = within(dialog).getByRole("button", { name: "Create & Link" });
+    await user.keyboard("{Escape}");
+    fireEvent.click(createButton);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mockApi.callsOf("post")).toHaveLength(0);
+  });
+
   it("offers no create option when the role may not create Providers", async () => {
     const { user } = renderField({}, userWith("inventory.view", "inventory.edit"));
     await user.type(screen.getByLabelText("Provider"), "Initech");

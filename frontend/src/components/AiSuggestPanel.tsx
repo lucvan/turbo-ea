@@ -37,11 +37,11 @@ interface Props {
   fieldsSchema?: SectionDef[];
 }
 
-/** Confidence level label and color */
+/** Confidence badge colour (the badge itself shows the percentage). */
 function confidenceBadge(confidence: number) {
-  if (confidence >= 0.8) return { label: "High", color: STATUS_COLORS.success };
-  if (confidence >= 0.5) return { label: "Medium", color: STATUS_COLORS.warning };
-  return { label: "Low", color: STATUS_COLORS.error };
+  if (confidence >= 0.8) return { color: STATUS_COLORS.success };
+  if (confidence >= 0.5) return { color: STATUS_COLORS.warning };
+  return { color: STATUS_COLORS.error };
 }
 
 /** Resolve a FieldDef from fieldsSchema by key */

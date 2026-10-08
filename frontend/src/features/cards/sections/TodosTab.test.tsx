@@ -145,7 +145,8 @@ describe("TodosTab", () => {
     ]);
     render(<TodosTab fsId={FS_ID} />);
     expect(await screen.findByRole("button", { name: /JIRA-42/ })).toHaveAttribute("title", "Open in Jira");
-    expect(screen.getByRole("button", { name: /SN-7/ })).toHaveAttribute("title", "Open in ");
+    // No tracker name: a plain "open in new tab", never "Open in " with nothing after it.
+    expect(screen.getByRole("button", { name: /SN-7/ })).toHaveAttribute("title", "Open in new tab");
   });
 
   it("flips an open todo to done, and a done one back to open", async () => {
@@ -410,5 +411,76 @@ describe("TodosTab", () => {
     dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByLabelText("Description")).toHaveValue("");
     expect(mockApi.callsOf("post", LIST)).toHaveLength(0);
+  });
+
+  describe("a failed write", () => {
+    it("shows the error when flipping a todo's status fails, and does not reload", async () => {
+      mockApi.fail("patch", "/todos/*", 500);
+      const user = userEvent.setup();
+      render(<TodosTab fsId={FS_ID} />);
+      await screen.findByText("Archive the old instance");
+      await user.click(within(rowOf("Mirrored ticket")).getAllByRole("button")[0]);
+      expect(await screen.findByRole("alert")).toHaveTextContent("PATCH /todos/t4 failed");
+      expect(mockApi.callsOf("get", LIST)).toHaveLength(1);
+    });
+
+    it("shows the error when activating a scheduled cycle fails", async () => {
+      mockApi.fail("post", /^\/todos\/.+\/promote$/, 500);
+      const user = userEvent.setup();
+      render(<TodosTab fsId={FS_ID} />);
+      await screen.findByText("Rotate credentials");
+      await user.click(screen.getByTitle("Activate now"));
+      expect(await screen.findByRole("alert")).toHaveTextContent("POST /todos/t3/promote failed");
+    });
+
+    it("shows the error when a delete fails and keeps the todo listed", async () => {
+      mockApi.fail("delete", "/todos/*", 500);
+      const user = userEvent.setup();
+      render(<TodosTab fsId={FS_ID} />);
+      await screen.findByText("Archive the old instance");
+      const buttons = within(rowOf("Archive the old instance")).getAllByRole("button");
+      await user.click(buttons[buttons.length - 1]);
+      expect(await screen.findByRole("alert")).toHaveTextContent("DELETE /todos/t2 failed");
+      expect(screen.getByText("Archive the old instance")).toBeInTheDocument();
+    });
+
+    it("falls back to the generic message for a non-Error rejection, and clears it on the next success", async () => {
+      mockApi.on("patch", "/todos/*", () => Promise.reject("socket hang up"));
+      const user = userEvent.setup();
+      render(<TodosTab fsId={FS_ID} />);
+      await screen.findByText("Archive the old instance");
+      await user.click(within(rowOf("Mirrored ticket")).getAllByRole("button")[0]);
+      expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong");
+
+      mockApi.on("patch", "/todos/*", {});
+      await user.click(within(rowOf("Mirrored ticket")).getAllByRole("button")[0]);
+      await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    });
+
+    it("keeps the Add dialog open with its draft and the error when the add fails", async () => {
+      mockApi.fail("post", LIST, 500);
+      const user = userEvent.setup();
+      render(<TodosTab fsId={FS_ID} />);
+      await screen.findByText("Archive the old instance");
+      await user.click(screen.getByRole("button", { name: /Add Todo/ }));
+      const dialog = await screen.findByRole("dialog");
+      await user.type(within(dialog).getByLabelText("Description"), "Renew the contract");
+      await user.click(within(dialog).getByRole("button", { name: "Add" }));
+
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+        `POST /cards/${FS_ID}/todos failed`,
+      );
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(within(dialog).getByLabelText("Description")).toHaveValue("Renew the contract");
+      expect(within(dialog).getByRole("button", { name: "Add" })).toBeEnabled();
+
+      // Cancelling drops the error with the draft.
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await user.click(screen.getByRole("button", { name: /Add Todo/ }));
+      const reopened = await screen.findByRole("dialog");
+      expect(within(reopened).queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
   });
 });

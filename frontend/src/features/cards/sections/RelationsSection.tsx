@@ -72,6 +72,16 @@ import { successorRelationKeys } from "@/lib/successorRelation";
  */
 type MultiLinkedMap = Map<string, { key: string; isSource: boolean; verb: string }[]>;
 
+/**
+ * A row's flow direction, in the Provider / Consumer words the buckets below
+ * and the attribute editor use (forward = provider, reverse = consumer).
+ */
+const FLOW_DIRECTION_TOOLTIP_KEYS = {
+  forward: "relations.role.provider",
+  reverse: "relations.role.consumer",
+  bidirectional: "relations.flowDirection.bidirectional",
+} as const;
+
 /* ── Relation Attributes Popover ────────────────────────────── */
 function RelationAttrsPopover({
   anchorEl,
@@ -112,7 +122,7 @@ function RelationAttrsPopover({
       onSaved(updated);
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("relations.errors.create"));
+      setError(e instanceof Error ? e.message : t("common:errors.generic"));
     } finally {
       setSaving(false);
     }
@@ -302,7 +312,7 @@ function RelationGroup({
     const attrBadges = relationAttributeBadges(rt, attrs);
     const attrSet = !!flowBadge || attrBadges.length > 0;
     const editTooltip = flowBadge
-      ? t(`relations.flowDirection.${flowBadge.value}`)
+      ? t(FLOW_DIRECTION_TOOLTIP_KEYS[flowBadge.value])
       : attrBadges.length > 0
         ? attrBadges
             .map((b) =>

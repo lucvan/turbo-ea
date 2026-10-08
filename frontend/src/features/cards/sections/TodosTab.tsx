@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
+import Alert from "@mui/material/Alert";
 import LinkifiedText from "@/components/LinkifiedText";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
@@ -39,6 +40,9 @@ function TodosTab({ fsId }: { fsId: string }) {
   const [newAssignee, setNewAssignee] = useState("");
   const [newDueDate, setNewDueDate] = useState("");
   const [saving, setSaving] = useState(false);
+  // A failed add is shown in its dialog; a failed list action above the list.
+  const [addError, setAddError] = useState("");
+  const [error, setError] = useState("");
 
   // Recurrence state for the Add dialog.
   const [recurring, setRecurring] = useState(false);
@@ -78,11 +82,16 @@ function TodosTab({ fsId }: { fsId: string }) {
     setRecurrenceInterval(1);
     setLeadTimeDirty(false);
     setLeadTimeDays(defaultLeadTimeDays("months", 1));
+    setAddError("");
   };
+
+  const errorMessage = (err: unknown) =>
+    err instanceof Error ? err.message : t("common:errors.generic");
 
   const handleAdd = async () => {
     if (!newDesc.trim() || saving) return;
     setSaving(true);
+    setAddError("");
     try {
       const payload: Record<string, unknown> = { description: newDesc };
       if (newAssignee) payload.assigned_to = newAssignee;
@@ -96,6 +105,8 @@ function TodosTab({ fsId }: { fsId: string }) {
       resetDialog();
       setDialogOpen(false);
       load();
+    } catch (err) {
+      setAddError(errorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -103,20 +114,35 @@ function TodosTab({ fsId }: { fsId: string }) {
 
   const toggleStatus = async (todo: Todo) => {
     const newStatus = todo.status === "open" ? "done" : "open";
-    await api.patch(`/todos/${todo.id}`, { status: newStatus });
-    // Reload so a completed recurring todo's freshly-spawned next occurrence
-    // shows up in the list.
-    load();
+    try {
+      await api.patch(`/todos/${todo.id}`, { status: newStatus });
+      setError("");
+      // Reload so a completed recurring todo's freshly-spawned next occurrence
+      // shows up in the list.
+      load();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
   };
 
   const promote = async (todo: Todo) => {
-    await api.post(`/todos/${todo.id}/promote`, {});
-    load();
+    try {
+      await api.post(`/todos/${todo.id}/promote`, {});
+      setError("");
+      load();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
   };
 
   const handleDelete = async (todoId: string) => {
-    await api.delete(`/todos/${todoId}`);
-    load();
+    try {
+      await api.delete(`/todos/${todoId}`);
+      setError("");
+      load();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
   };
 
   const isRecurring = (todo: Todo) => !!todo.recurrence_unit && todo.recurrence_unit !== "none";
@@ -134,6 +160,11 @@ function TodosTab({ fsId }: { fsId: string }) {
           {t("todos.add")}
         </Button>
       </Box>
+      {error && (
+        <Alert severity="error" onClose={() => setError("")} sx={{ mb: 1 }}>
+          {error}
+        </Alert>
+      )}
       <List dense>
         {todos.map((td) => {
           const scheduled = td.status === "scheduled";
@@ -214,9 +245,11 @@ function TodosTab({ fsId }: { fsId: string }) {
                       <Chip
                         size="small"
                         label={td.external_ref ?? td.external_source}
-                        title={t("common:todos.openExternal", {
-                          source: td.external_source ?? "",
-                        })}
+                        title={
+                          td.external_source
+                            ? t("common:todos.openExternal", { source: td.external_source })
+                            : t("common:actions.openInNewTab")
+                        }
                         icon={<MaterialSymbol icon="open_in_new" size={14} />}
                         variant="outlined"
                         color="primary"
@@ -255,6 +288,11 @@ function TodosTab({ fsId }: { fsId: string }) {
       >
         <DialogTitle>{t("todos.add")}</DialogTitle>
         <DialogContent>
+          {addError && (
+            <Alert severity="error" onClose={() => setAddError("")} sx={{ mt: 1 }}>
+              {addError}
+            </Alert>
+          )}
           <TextField
             autoFocus
             label={t("common:labels.description")}

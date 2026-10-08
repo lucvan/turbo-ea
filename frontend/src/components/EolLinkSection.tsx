@@ -48,6 +48,20 @@ function formatEolField(
   return { label: t("eol.status.unknown"), color: STATUS_COLORS.neutral };
 }
 
+/**
+ * Active support reads the other way round from EOL: `true` means the cycle is
+ * still supported, `false` that support has ended. A date means the same in
+ * both (past = ended), so it falls through to `formatEolField`.
+ */
+function formatSupportField(
+  val: string | boolean | null | undefined,
+  t: (key: string) => string,
+): { label: string; color: string } {
+  if (val === true) return { label: t("common:labels.yes"), color: STATUS_COLORS.success };
+  if (val === false) return { label: t("common:labels.no"), color: STATUS_COLORS.error };
+  return formatEolField(val, t);
+}
+
 /** Compute overall status from cycle data. */
 function computeEolStatus(
   cycle: EolCycle,
@@ -384,7 +398,7 @@ function EolCycleDetails({ cycle }: { cycle: EolCycle }) {
   const { t } = useTranslation(["cards", "common"]);
   const status = computeEolStatus(cycle, t);
   const eolInfo = formatEolField(cycle.eol, t);
-  const supportInfo = formatEolField(cycle.support, t);
+  const supportInfo = formatSupportField(cycle.support, t);
 
   return (
     <Box>
@@ -545,6 +559,9 @@ export default function EolLinkSection({ card, onSave, initialExpanded }: EolLin
   }, [eolProduct, eolCycle]);
 
   useEffect(() => {
+    // A different product/cycle: the previous one's details must not sit under
+    // the new header while its own fetch is in flight. (Refresh keeps them.)
+    setCycleData(null);
     fetchCycleData();
   }, [fetchCycleData]);
 

@@ -271,7 +271,9 @@ describe("RelationsSection — attribute popover", () => {
     const { user } = renderSection();
     await user.click(await screen.findByRole("button", { name: "Edit details" }));
     await user.click(await screen.findByRole("button", { name: "Save" }));
-    expect(await screen.findByText("Failed to create relation")).toBeInTheDocument();
+    // The save updates an existing relation: it never reports a failed create.
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong");
+    expect(screen.queryByText("Failed to create relation")).not.toBeInTheDocument();
   });
 });
 
@@ -298,8 +300,13 @@ describe("RelationsSection — flowDirection buckets", () => {
     // A bidirectional row sits in both buckets.
     expect(screen.getAllByText("Sync Bus")).toHaveLength(2);
     expect(at("Unspecified")).toBeLessThan(at("Legacy Link"));
-    // The bidirectional row's button names its direction.
+    // Each row's button names its direction — in words, never a raw i18n key.
     expect(screen.getAllByRole("button", { name: "Bidirectional" })).toHaveLength(2);
+    const ordersRow = screen.getByText("Orders API").closest("li") as HTMLElement;
+    expect(within(ordersRow).getByRole("button", { name: "Provider" })).toBeInTheDocument();
+    const billingRow = screen.getByText("Billing Feed").closest("li") as HTMLElement;
+    expect(within(billingRow).getByRole("button", { name: "Consumer" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /relations\.flowDirection/ })).not.toBeInTheDocument();
   });
 
   it("names the buckets Provider / Consumer from the target side and shows empty buckets", async () => {
@@ -316,6 +323,9 @@ describe("RelationsSection — flowDirection buckets", () => {
     expect(await screen.findByText("Provider Application")).toBeInTheDocument();
     expect(screen.getByText("Consumer Application")).toBeInTheDocument();
     expect(screen.getByText("None yet")).toBeInTheDocument();
+    // The row sits in the Provider bucket, and its button says so.
+    const erpRow = screen.getByText("ERP").closest("li") as HTMLElement;
+    expect(within(erpRow).getByRole("button", { name: "Provider" })).toBeInTheDocument();
     expect(screen.queryByText("Unspecified")).not.toBeInTheDocument();
   });
 });

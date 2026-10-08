@@ -153,11 +153,17 @@ function SuccessorsSection({
   };
 
   const handleRemove = async (relId: string) => {
-    await api.delete(`/relations/${relId}`);
-    loadRelations();
+    try {
+      setError("");
+      await api.delete(`/relations/${relId}`);
+      loadRelations();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : t("common:errors.generic"));
+    }
   };
 
   const closeDialog = () => {
+    setError("");
     setAddMode(null);
     setSelected(null);
     setSearch("");

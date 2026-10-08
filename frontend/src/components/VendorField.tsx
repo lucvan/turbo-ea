@@ -201,6 +201,13 @@ export default function VendorField({
     }
   };
 
+  // Cancel and Escape both forget the pending Provider, so nothing can still
+  // create it from the dialog while it closes.
+  const closeConfirm = () => {
+    setConfirmOpen(false);
+    setPendingProvider(null);
+  };
+
   const linkProvider = async (providerId: string) => {
     if (!relType || !fsId) return;
 
@@ -256,10 +263,10 @@ export default function VendorField({
             }
           }}
           onChange={(_e, newVal) => {
+            // `value` is the input text itself, so freeSolo never reports a
+            // typed string here: typing goes through onInputChange.
             if (newVal && typeof newVal !== "string") {
               handleSelect(newVal as ProviderOption);
-            } else if (typeof newVal === "string") {
-              onChange(newVal || undefined);
             } else if (newVal === null) {
               onChange(undefined);
               setLinkedProvider(null);
@@ -343,7 +350,7 @@ export default function VendorField({
       </Box>
 
       {/* Create Provider confirmation dialog */}
-      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth>
+      <Dialog open={confirmOpen} onClose={closeConfirm} maxWidth="xs" fullWidth>
         <DialogTitle>{t("vendor.createNew.title")}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
@@ -351,7 +358,7 @@ export default function VendorField({
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setConfirmOpen(false)}>{t("common:actions.cancel")}</Button>
+          <Button onClick={closeConfirm}>{t("common:actions.cancel")}</Button>
           <Button
             variant="contained"
             onClick={handleCreateAndLink}
