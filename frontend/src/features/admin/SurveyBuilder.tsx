@@ -160,6 +160,10 @@ export default function SurveyBuilder() {
   // Load existing survey if editing
   useEffect(() => {
     if (!id) return;
+    // A route change in place opens another survey: the previous one's chips
+    // must not stay on screen next to (or instead of) this one's.
+    setCardItems([]);
+    setRelatedItems([]);
     const load = async () => {
       try {
         const s = await api.get<Survey>(`/surveys/${id}`);
@@ -402,12 +406,17 @@ export default function SurveyBuilder() {
     );
   }, [relationTypes, targetTypeKey, relatedItems]);
 
-  // A narrowed relation type is meaningless once it no longer applies.
+  // A narrowed relation type is meaningless once it no longer applies — but
+  // that can only be judged once the related cards are known. A reopened
+  // draft hydrates them after it loads, and judging before that would drop
+  // its stored narrowing.
+  const relatedKnown = relatedIds.every((rid) => relatedItems.some((c) => c.id === rid));
   useEffect(() => {
+    if (!relatedKnown) return;
     if (relationTypeKey && !relatedRelationTypes.some((rt) => rt.key === relationTypeKey)) {
       setRelationTypeKey("");
     }
-  }, [relatedRelationTypes, relationTypeKey]);
+  }, [relatedRelationTypes, relationTypeKey, relatedKnown]);
 
   // Save draft
   const saveDraft = useCallback(async () => {
@@ -447,9 +456,13 @@ export default function SurveyBuilder() {
   // to be written first — `saveDraft` both creates-or-updates and hands back the
   // id to preview, which is what keeps this from minting a second draft.
   const loadPreview = useCallback(async () => {
-    const sid = await saveDraft();
-    if (!sid) return; // save failed; saveDraft has already surfaced the error
+    // Spinner first: the save below is part of the preview's wait.
     setPreviewing(true);
+    const sid = await saveDraft();
+    if (!sid) {
+      setPreviewing(false);
+      return; // save failed; saveDraft has already surfaced the error
+    }
     setError("");
     try {
       const data = await api.post<SurveyPreviewResult>(`/surveys/${sid}/preview`, {});
@@ -592,7 +605,9 @@ export default function SurveyBuilder() {
       setError(t("surveyBuilder.validation.nameRequired"));
       return;
     }
-    if (activeStep === 1 && !targetTypeKey) {
+    // Against the types the select offers: a draft's type may have been
+    // removed or hidden since, which leaves the select blank.
+    if (activeStep === 1 && !types.some((ct) => ct.key === targetTypeKey && !ct.is_hidden)) {
       setError(t("surveyBuilder.validation.typeRequired"));
       return;
     }
@@ -612,15 +627,11 @@ export default function SurveyBuilder() {
       await saveDraft();
     }
 
-    if (activeStep === 3) {
-      // Load preview when entering the last step
-    }
+    setActiveStep((prev) => prev + 1);
 
-    setActiveStep((prev) => Math.min(prev + 1, STEPS.length - 1));
-
-    // Auto-load preview on step 4
+    // Auto-load preview on step 4, in the same render that shows the step.
     if (activeStep === 2) {
-      setTimeout(() => loadPreview(), 100);
+      void loadPreview();
     }
   };
 

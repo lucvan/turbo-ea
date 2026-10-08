@@ -172,8 +172,10 @@ export default function RelationTypeValuesDialog({ open, relationType, onClose, 
   const invalid = schema.some(
     (f) =>
       isManaged(f) &&
-      ((!f.built_in && (!isValidKey(f.key) || !f.label.trim())) ||
-        (f.options ?? []).some((o) => !o.built_in && (!isValidKey(o.key) || !o.label.trim()))),
+      ((!f.built_in && (!isValidKey(f.key) || !(f.label ?? "").trim())) ||
+        (f.options ?? []).some(
+          (o) => !o.built_in && (!isValidKey(o.key) || !(o.label ?? "").trim()),
+        )),
   );
 
   // Keys must be unique: dimension keys across the whole schema, and option keys

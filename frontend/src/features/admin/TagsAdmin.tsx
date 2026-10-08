@@ -19,6 +19,7 @@ import DialogActions from "@mui/material/DialogActions";
 import Chip from "@mui/material/Chip";
 import Tooltip from "@mui/material/Tooltip";
 import Autocomplete from "@mui/material/Autocomplete";
+import Alert from "@mui/material/Alert";
 import MaterialSymbol from "@/components/MaterialSymbol";
 import { useMetamodel } from "@/hooks/useMetamodel";
 import { useTypeLabel } from "@/hooks/useResolveLabel";
@@ -64,15 +65,32 @@ export default function TagsAdmin() {
   const [editTag, setEditTag] = useState<Tag | null>(null);
   const [editTagDraft, setEditTagDraft] = useState({ name: "", description: "", color: "#1976d2" });
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  // The failure of the open dialog's request (only one dialog is open at a
+  // time), and of the list load ("" when it carried no message).
+  const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const messageOf = (e: unknown) => (e instanceof Error ? e.message : t("common:errors.generic"));
 
-  const load = () => api.get<TagGroup[]>("/tag-groups").then(setGroups);
+  const load = () =>
+    api.get<TagGroup[]>("/tag-groups").then(
+      (res) => {
+        setGroups(res);
+        setLoadError(null);
+      },
+      (e) => setLoadError(e instanceof Error ? e.message : ""),
+    );
 
   useEffect(() => {
     load();
   }, []);
 
   const createGroup = async () => {
-    await api.post("/tag-groups", { name: groupName });
+    try {
+      await api.post("/tag-groups", { name: groupName.trim() });
+    } catch (e) {
+      setError(messageOf(e));
+      return;
+    }
     setGroupName("");
     setCreateGroupOpen(false);
     load();
@@ -80,11 +98,16 @@ export default function TagsAdmin() {
 
   const createTag = async () => {
     if (!addTagGroupId) return;
-    await api.post(`/tag-groups/${addTagGroupId}/tags`, {
-      name: tagName,
-      description: tagDescription.trim() || null,
-      color: tagColor,
-    });
+    try {
+      await api.post(`/tag-groups/${addTagGroupId}/tags`, {
+        name: tagName.trim(),
+        description: tagDescription.trim() || null,
+        color: tagColor,
+      });
+    } catch (e) {
+      setError(messageOf(e));
+      return;
+    }
     setTagName("");
     setTagDescription("");
     setAddTagGroupId(null);
@@ -92,6 +115,7 @@ export default function TagsAdmin() {
   };
 
   const openEditGroup = (g: TagGroup) => {
+    setError("");
     setEditGroup(g);
     setEditGroupDraft({
       name: g.name,
@@ -114,12 +138,18 @@ export default function TagsAdmin() {
           ? editGroupDraft.restrict_to_types
           : null,
     };
-    await api.patch(`/tag-groups/${editGroup.id}`, payload);
+    try {
+      await api.patch(`/tag-groups/${editGroup.id}`, payload);
+    } catch (e) {
+      setError(messageOf(e));
+      return;
+    }
     setEditGroup(null);
     load();
   };
 
   const openEditTag = (tag: Tag) => {
+    setError("");
     setEditTag(tag);
     setEditTagDraft({
       name: tag.name,
@@ -130,34 +160,68 @@ export default function TagsAdmin() {
 
   const updateTag = async () => {
     if (!editTag) return;
-    await api.patch(`/tag-groups/${editTag.tag_group_id}/tags/${editTag.id}`, {
-      ...editTagDraft,
-      description: editTagDraft.description.trim() || null,
-    });
+    try {
+      await api.patch(`/tag-groups/${editTag.tag_group_id}/tags/${editTag.id}`, {
+        ...editTagDraft,
+        description: editTagDraft.description.trim() || null,
+      });
+    } catch (e) {
+      setError(messageOf(e));
+      return;
+    }
     setEditTag(null);
     load();
   };
 
+  const openDelete = (target: DeleteTarget) => {
+    setError("");
+    setDeleteTarget(target);
+  };
+
   const confirmDelete = async () => {
     if (!deleteTarget) return;
-    if (deleteTarget.kind === "group") {
-      await api.delete(`/tag-groups/${deleteTarget.id}`);
-    } else {
-      await api.delete(`/tag-groups/${deleteTarget.groupId}/tags/${deleteTarget.id}`);
+    try {
+      if (deleteTarget.kind === "group") {
+        await api.delete(`/tag-groups/${deleteTarget.id}`);
+      } else {
+        await api.delete(`/tag-groups/${deleteTarget.groupId}/tags/${deleteTarget.id}`);
+      }
+    } catch (e) {
+      setError(messageOf(e));
+      return;
     }
     setDeleteTarget(null);
     load();
   };
+
+  const errorAlert = error && (
+    <Alert severity="error" sx={{ mt: 1, mb: 2 }}>
+      {error}
+    </Alert>
+  );
 
   return (
     <Box>
       <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 3 }}>
         <Typography variant="h5" fontWeight={600}>{t("tags.title")}</Typography>
         <Box sx={{ flex: 1 }} />
-        <Button variant="contained" startIcon={<MaterialSymbol icon="add" size={18} />} onClick={() => setCreateGroupOpen(true)}>
+        <Button
+          variant="contained"
+          startIcon={<MaterialSymbol icon="add" size={18} />}
+          onClick={() => {
+            setError("");
+            setCreateGroupOpen(true);
+          }}
+        >
           {t("tags.newGroup")}
         </Button>
       </Box>
+
+      {loadError !== null && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {loadError || t("common:errors.generic")}
+        </Alert>
+      )}
 
       {groups.map((g) => (
         <Card key={g.id} sx={{ mb: 2 }}>
@@ -186,11 +250,19 @@ export default function TagsAdmin() {
                 );
               })()}
               <Box sx={{ flex: 1 }} />
-              <Button size="small" onClick={() => setAddTagGroupId(g.id)}>{t("tags.addTag")}</Button>
+              <Button
+                size="small"
+                onClick={() => {
+                  setError("");
+                  setAddTagGroupId(g.id);
+                }}
+              >
+                {t("tags.addTag")}
+              </Button>
               <IconButton size="small" aria-label={t("tags.editGroup")} title={t("tags.editGroup")} onClick={() => openEditGroup(g)}>
                 <MaterialSymbol icon="edit" size={18} />
               </IconButton>
-              <IconButton size="small" color="error" aria-label={t("tags.deleteGroup")} title={t("tags.deleteGroup")} onClick={() => setDeleteTarget({ kind: "group", id: g.id, name: g.name })}>
+              <IconButton size="small" color="error" aria-label={t("tags.deleteGroup")} title={t("tags.deleteGroup")} onClick={() => openDelete({ kind: "group", id: g.id, name: g.name })}>
                 <MaterialSymbol icon="delete" size={18} />
               </IconButton>
             </Box>
@@ -202,7 +274,7 @@ export default function TagsAdmin() {
                   title={tag.description || undefined}
                   sx={tag.color ? { bgcolor: tag.color, color: readableTextColor(tag.color) } : {}}
                   onClick={() => openEditTag(tag)}
-                  onDelete={() => setDeleteTarget({ kind: "tag", id: tag.id, groupId: g.id, name: tag.name })}
+                  onDelete={() => openDelete({ kind: "tag", id: tag.id, groupId: g.id, name: tag.name })}
                 />
               ))}
               {g.tags.length === 0 && <Typography variant="body2" color="text.secondary">{t("tags.noTags")}</Typography>}
@@ -214,6 +286,7 @@ export default function TagsAdmin() {
       <Dialog open={createGroupOpen} onClose={() => setCreateGroupOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>{t("tags.newGroup")}</DialogTitle>
         <DialogContent>
+          {errorAlert}
           <TextField fullWidth label={t("tags.groupName")} value={groupName} onChange={(e) => setGroupName(e.target.value)} sx={{ mt: 1 }} />
         </DialogContent>
         <DialogActions>
@@ -225,6 +298,7 @@ export default function TagsAdmin() {
       <Dialog open={!!addTagGroupId} onClose={() => setAddTagGroupId(null)} maxWidth="xs" fullWidth>
         <DialogTitle>{t("tags.addTag")}</DialogTitle>
         <DialogContent>
+          {errorAlert}
           <TextField fullWidth label={t("tags.tagName")} value={tagName} onChange={(e) => setTagName(e.target.value)} sx={{ mt: 1, mb: 2 }} />
           <TextField
             fullWidth
@@ -246,6 +320,7 @@ export default function TagsAdmin() {
       <Dialog open={!!editGroup} onClose={() => setEditGroup(null)} maxWidth="xs" fullWidth>
         <DialogTitle>{t("tags.editGroup")}</DialogTitle>
         <DialogContent>
+          {errorAlert}
           <TextField
             fullWidth
             label={t("tags.groupName")}
@@ -337,6 +412,7 @@ export default function TagsAdmin() {
       <Dialog open={!!editTag} onClose={() => setEditTag(null)} maxWidth="xs" fullWidth>
         <DialogTitle>{t("tags.editTag")}</DialogTitle>
         <DialogContent>
+          {errorAlert}
           <TextField
             fullWidth
             label={t("tags.tagName")}
@@ -377,6 +453,7 @@ export default function TagsAdmin() {
               ? t("tags.deleteGroupConfirm", { name: deleteTarget?.name })
               : t("tags.deleteTagConfirm", { name: deleteTarget?.name })}
           </DialogContentText>
+          {errorAlert}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteTarget(null)}>{t("common:actions.cancel")}</Button>
