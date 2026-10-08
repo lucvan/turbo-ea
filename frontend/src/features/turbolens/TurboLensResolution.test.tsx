@@ -146,11 +146,21 @@ describe("TurboLensResolution", () => {
     ).toBeInTheDocument();
   });
 
-  it("treats a failed load as no data", async () => {
+  it("shows the error, not the empty state, when the hierarchy cannot be loaded", async () => {
     mockApi.fail("get", LIST_URL);
     renderTab();
 
-    expect(await screen.findByText("No vendor hierarchy data")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(`GET ${LIST_URL} failed`);
+    expect(screen.queryByText("No vendor hierarchy data")).not.toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
+  it("falls back to a generic message when the failed load carries none", async () => {
+    mockApi.on("get", LIST_URL, () => Promise.reject("offline"));
+    renderTab();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong");
+    expect(screen.queryByText("No vendor hierarchy data")).not.toBeInTheDocument();
   });
 
   it("summarises the hierarchy in KPI tiles", async () => {
@@ -455,7 +465,7 @@ describe("TurboLensResolution", () => {
     expect(await screen.findByText("Vendor resolution started")).toBeInTheDocument();
   });
 
-  it("empties the hierarchy when the reload after a run fails", async () => {
+  it("shows the error instead of the hierarchy when the reload after a run fails", async () => {
     mockApi.on("get", LIST_URL, HIERARCHY);
     mockApi.on("post", RESOLVE_URL, { run_id: "run-7" });
     let answerPoll: (run: unknown) => void = () => {};
@@ -468,7 +478,43 @@ describe("TurboLensResolution", () => {
 
     mockApi.fail("get", LIST_URL);
     answerPoll({ id: "run-7", status: "completed", analysis_type: "vendor_resolution" });
-    expect(await screen.findByText("No vendor hierarchy data")).toBeInTheDocument();
+    expect(await screen.findByText(`GET ${LIST_URL} failed`)).toBeInTheDocument();
+    expect(screen.queryByText("No vendor hierarchy data")).not.toBeInTheDocument();
     expect(screen.queryByText("Vendor Hierarchy (4)")).not.toBeInTheDocument();
+  });
+
+  it("clears a failed load's error once a later reload succeeds", async () => {
+    mockApi.fail("get", LIST_URL);
+    mockApi.on("post", RESOLVE_URL, { run_id: "run-7" });
+    let answerPoll: (run: unknown) => void = () => {};
+    mockApi.on("get", RUN_URL, () => new Promise((r) => (answerPoll = r)));
+    const { user } = renderTab();
+
+    expect(await screen.findByText(`GET ${LIST_URL} failed`)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: RESOLVE }));
+    await waitFor(() => expect(mockApi.callsOf("get", RUN_URL)).toHaveLength(1));
+
+    mockApi.on("get", LIST_URL, HIERARCHY);
+    answerPoll({ id: "run-7", status: "completed", analysis_type: "vendor_resolution" });
+    expect(await screen.findByText("Vendor Hierarchy (4)")).toBeInTheDocument();
+    expect(screen.queryByText(`GET ${LIST_URL} failed`)).not.toBeInTheDocument();
+  });
+
+  it("lists exactly the untyped entries under the \"unknown\" type", async () => {
+    mockApi.on("get", LIST_URL, [
+      WIDGET,
+      entry({ id: "u", canonical_name: "Untyped", vendor_type: "" }),
+      entry({ id: "n", canonical_name: "Null typed", vendor_type: null as unknown as string }),
+    ]);
+    const { user } = renderTab();
+    // Typed entries keep their own type; the two untyped ones share "unknown".
+    await screen.findByText("Vendor Hierarchy (3)");
+
+    await choose(user, 0, "unknown");
+    expect(names().sort()).toEqual(["Null typed", "Untyped"]);
+    expect(screen.getByText("Vendor Hierarchy (2)")).toBeInTheDocument();
+
+    await choose(user, 0, "module");
+    expect(names()).toEqual(["Widget Module"]);
   });
 });

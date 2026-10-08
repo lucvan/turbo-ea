@@ -13,13 +13,14 @@
  * props, `Background` and the provider are no-ops, and `EdgeLabelRenderer`
  * portals into the document instead of the flow's viewport.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { createPortal } from "react-dom";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import type { ComponentProps, ComponentType, ReactNode } from "react";
 import { Position, type Edge, type Node } from "@xyflow/react";
 import { CARD_TYPES } from "@/test/fixtures/metamodel";
+import i18n from "@/i18n";
 import type { ArchitectureResult } from "@/types";
 
 const rf = vi.hoisted(() => ({
@@ -75,7 +76,8 @@ vi.mock("@xyflow/react", async (importOriginal) => {
                     sourcePosition={actual.Position.Bottom}
                     targetPosition={actual.Position.Top}
                     data={e.data}
-                    markerEnd="url(#arrow)"
+                    markerStart={e.markerStart ? "url(#arrow-start)" : undefined}
+                    markerEnd={e.markerEnd ? "url(#arrow-end)" : undefined}
                   />
                 ) : null}
               </g>
@@ -169,6 +171,9 @@ function edgeOf(source: string, target: string): Edge {
   return edge;
 }
 
+/** The closed arrowhead every integration carries at its target end. */
+const ARROW = { type: "arrowclosed", color: "#888" };
+
 beforeEach(() => {
   rf.props = null;
   rf.controls = null;
@@ -202,7 +207,7 @@ describe("ArchitectureDiagram", () => {
     expect(screen.getByText("1 new components")).toBeInTheDocument();
     expect(screen.queryByText(/existing reused/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Recommended/)).not.toBeInTheDocument();
-    expect(screen.getByText("1 components · 0 integrations")).toBeInTheDocument();
+    expect(screen.getByText("1 component · 0 integrations")).toBeInTheDocument();
   });
 
   it("draws one group per non-empty layer and one row of nodes per layer", () => {
@@ -284,6 +289,9 @@ describe("ArchitectureDiagram", () => {
     const portalToDb = edgeOf("arch-0", "arch-2");
     expect(portalToDb).toMatchObject({ sourceHandle: "b", targetHandle: "t", type: "archEdge" });
     expect(portalToDb.data).toMatchObject({ label: "REST, async", protocol: "REST", direction: "async" });
+    // Written top → bottom: the arrowhead is at the drawn target.
+    expect(portalToDb.markerEnd).toEqual(ARROW);
+    expect(portalToDb.markerStart).toBeUndefined();
 
     // Same layer, left to right: side handles; a sync direction is not spelled out.
     const portalToCrm = edgeOf("arch-0", "arch-1");
@@ -294,6 +302,10 @@ describe("ArchitectureDiagram", () => {
     const busToPortal = edgeOf("arch-0", "arch-4");
     expect(busToPortal).toMatchObject({ sourceHandle: "b", targetHandle: "t" });
     expect(busToPortal.data).toMatchObject({ label: "" });
+    // The arrowhead stays on the integration's real target, the portal: the
+    // drawn start of the line, so Event Bus → Customer Portal still reads that way.
+    expect(busToPortal.markerStart).toEqual(ARROW);
+    expect(busToPortal.markerEnd).toBeUndefined();
 
     const replicaToBus = edgeOf("arch-2", "arch-4");
     expect(replicaToBus).toMatchObject({ sourceHandle: "r", targetHandle: "l" });
@@ -306,13 +318,21 @@ describe("ArchitectureDiagram", () => {
     ]);
   });
 
-  it("connects a same-layer integration written right to left", () => {
+  it("connects a same-layer integration written right to left, the arrowhead on its real target", () => {
     renderDiagram({
       layers: [{ name: "L", components: [{ name: "Left App", type: "new" }, { name: "Right App", type: "new" }] }],
       integrations: [{ from: "Right App", to: "Left App", protocol: "SOAP" }],
     });
     const [edge] = rf.props?.edges ?? [];
-    expect([edge.source, edge.target].sort()).toEqual(["arch-0", "arch-1"]);
+    // Drawn left to right, between the facing sides …
+    expect(edge).toMatchObject({ source: "arch-0", target: "arch-1", sourceHandle: "r", targetHandle: "l" });
+    // … through handles React Flow can connect: a source handle on the source
+    // node, a target handle on the target node.
+    expect(handlesOf("arch-0").find((h) => h.id === edge.sourceHandle)?.type).toBe("source");
+    expect(handlesOf("arch-1").find((h) => h.id === edge.targetHandle)?.type).toBe("target");
+    // Right App → Left App: the arrow points at Left App, the drawn start.
+    expect(edge.markerStart).toEqual(ARROW);
+    expect(edge.markerEnd).toBeUndefined();
     expect(edge.data).toMatchObject({ label: "SOAP" });
   });
 
@@ -436,11 +456,16 @@ describe("ArchitectureDiagram — what React Flow is handed", () => {
     }
   });
 
-  it("draws every edge as a closed arrow above the nodes, without animation", () => {
+  it("draws every edge with one closed arrow at its integration's target, above the nodes, without animation", () => {
     renderDiagram();
-    for (const e of rf.props?.edges ?? []) {
-      expect(e).toMatchObject({ animated: false, zIndex: 2, markerEnd: { type: "arrowclosed", color: "#888" } });
+    const edges = rf.props?.edges ?? [];
+    expect(edges).toHaveLength(4);
+    for (const e of edges) {
+      expect(e).toMatchObject({ animated: false, zIndex: 2 });
+      expect([e.markerStart, e.markerEnd].filter(Boolean)).toEqual([ARROW]);
     }
+    // Only the integration written bottom → top has its arrowhead at the drawn start.
+    expect(edges.filter((e) => e.markerStart).map((e) => `${e.source}>${e.target}`)).toEqual(["arch-0>arch-4"]);
   });
 
   it("cycles the layer colours after the seventh layer", () => {
@@ -522,7 +547,7 @@ describe("ArchitectureDiagram — what React Flow is handed", () => {
       layers: [{ name: "Bare" } as never, { name: "Real", components: [{ name: "Solo", type: "new" }] }],
     });
     expect((rf.props?.nodes ?? []).map((n) => n.id)).toEqual(["layer-1", "arch-0"]);
-    expect(screen.getByText("1 components · 0 integrations")).toBeInTheDocument();
+    expect(screen.getByText("1 component · 0 integrations")).toBeInTheDocument();
   });
 
   it("omits the new-components chip when nothing is new", () => {
@@ -556,7 +581,7 @@ describe("ArchitectureDiagram — what React Flow is handed", () => {
       />,
     );
     expect(within(nodeEl("arch-0")).getByText("Fresh")).toBeInTheDocument();
-    expect(screen.getByText("1 components · 0 integrations")).toBeInTheDocument();
+    expect(screen.getByText("1 component · 0 integrations")).toBeInTheDocument();
   });
 });
 
@@ -603,6 +628,16 @@ describe("ArchitectureDiagram — edge rendering", () => {
     if (!path) throw new Error(`no path for ${edgeId}`);
     return path as SVGPathElement;
   }
+
+  it("puts the arrowhead on the path end the edge asks for", () => {
+    renderDiagram();
+    // arch-e-0: Customer Portal → Postgres Cluster, drawn as written.
+    expect(edgePath("arch-e-0")).toHaveAttribute("marker-end", "url(#arrow-end)");
+    expect(edgePath("arch-e-0")).not.toHaveAttribute("marker-start");
+    // arch-e-2: Event Bus → Customer Portal, drawn from the portal down.
+    expect(edgePath("arch-e-2")).toHaveAttribute("marker-start", "url(#arrow-start)");
+    expect(edgePath("arch-e-2")).not.toHaveAttribute("marker-end");
+  });
 
   it("routes each edge from its source point to its target point", () => {
     renderDiagram();
@@ -684,5 +719,34 @@ describe("ArchitectureDiagram — edge rendering", () => {
     expect(css).toContain('[data-id="arch-0"]');
     expect(css).not.toContain('[data-id="arch-2"]');
     expect(css).not.toContain('[data-id="arch-4"]');
+  });
+});
+
+describe("ArchitectureDiagram — translated labels", () => {
+  afterEach(async () => {
+    await act(async () => {
+      await i18n.changeLanguage("en");
+    });
+  });
+
+  it("counts one component and one integration in the singular", () => {
+    renderDiagram({
+      layers: [{ name: "L", components: [{ name: "Solo", type: "new" }, { name: "Duo", type: "new" }] }],
+      integrations: [{ from: "Solo", to: "Duo" }],
+    });
+    expect(screen.getByText("2 components · 1 integration")).toBeInTheDocument();
+  });
+
+  it("names the badges and the summary chip in the user's language", async () => {
+    await act(async () => {
+      await i18n.changeLanguage("de");
+    });
+    renderDiagram();
+
+    expect(within(nodeEl("arch-0")).getByText("Neu")).toBeInTheDocument();
+    expect(within(nodeEl("arch-1")).getByText("Kaufen")).toBeInTheDocument();
+    expect(within(nodeEl("arch-2")).getByText("Wiederverwenden")).toBeInTheDocument();
+    expect(screen.getByText("5 Komponenten · 6 Integrationen")).toBeInTheDocument();
+    expect(screen.queryByText(/components|integrations/)).not.toBeInTheDocument();
   });
 });

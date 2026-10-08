@@ -269,9 +269,7 @@ export default function CommitInitiativeDialog({
   };
 
   const openInitiative = () => {
-    const initId =
-      resultData?.initiative_id ||
-      (resultData as Record<string, unknown>)?.initiative_id;
+    const initId = resultData?.initiative_id;
     if (initId) {
       window.open(`/cards/${initId}`, "_blank");
     }

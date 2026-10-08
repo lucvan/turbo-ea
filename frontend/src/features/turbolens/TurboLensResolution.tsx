@@ -44,6 +44,9 @@ export default function TurboLensResolution() {
   const [resolving, setResolving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // A failed load is shown in place of the hierarchy, never as "no data".
+  // "" = failed with no message of its own.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("__all__");
   const [categoryFilter, setCategoryFilter] = useState("__all__");
@@ -52,11 +55,13 @@ export default function TurboLensResolution() {
 
   const loadHierarchy = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await api.get<TurboLensVendorHierarchy[]>("/turbolens/vendors/hierarchy");
       setHierarchy(data);
-    } catch {
+    } catch (err: unknown) {
       setHierarchy([]);
+      setLoadError(err instanceof Error ? err.message : "");
     } finally {
       setLoading(false);
     }
@@ -95,7 +100,8 @@ export default function TurboLensResolution() {
   const filtered = useMemo(() => {
     let result = hierarchy;
     if (typeFilter !== "__all__") {
-      result = result.filter(v => v.vendor_type === typeFilter);
+      // Same derivation as the option list: an untyped entry is "unknown".
+      result = result.filter(v => (v.vendor_type || "unknown") === typeFilter);
     }
     if (categoryFilter !== "__all__") {
       result = result.filter(v => v.category === categoryFilter);
@@ -164,6 +170,8 @@ export default function TurboLensResolution() {
         <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}>
           <CircularProgress />
         </Box>
+      ) : loadError !== null ? (
+        <Alert severity="error">{loadError || t("common:errors.generic")}</Alert>
       ) : hierarchy.length === 0 ? (
         <Paper sx={{ p: 4, textAlign: "center" }}>
           <MaterialSymbol icon="account_tree" size={48} color="#9e9e9e" />
