@@ -10,12 +10,24 @@
  *   busy for the life of the tab, so `networkidle` never arrives.
  * - `drawio` / `waitForDrawio`: the DrawIO iframe, ready once the SPA's
  *   bootstrap has put the graph on `window.__turboGraph`.
+ * - `page` (override): with `E2E_COVERAGE=1`, records Chromium's V8 coverage
+ *   of the SPA's `/assets/*.js` chunks into
+ *   `.e2e-coverage/<testId>-<repeat>-<retry>.json` (a V8 `ProcessCov`,
+ *   `{ result: ScriptCov[] }`), one file per test run — a worker restart loses
+ *   nothing already written, and `--repeat-each` keeps every repetition
+ *   instead of the last one overwriting the rest. `scripts/e2e-coverage.mjs`
+ *   remaps them onto the sources and `Frontend Tests` (ci.yml) merges that
+ *   with the unit suite's coverage. Every spec imports `test` from here —
+ *   `login.spec.ts` included — so the fixture reaches them all. A second page
+ *   (`context.newPage()`, a popup) is not recorded; no spec opens one.
  */
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { test as base, expect, type APIRequestContext, type Frame, type FrameLocator, type Page } from "@playwright/test";
 
+import { isAppAsset } from "../scripts/app-asset.mjs";
 import { t } from "./i18n";
 
 export const E2E_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -24,6 +36,11 @@ export const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:4173";
 export const STORAGE_STATE = path.join(E2E_DIR, ".auth", "admin.json");
 /** The demo admin the seed creates (`SEED_DEMO=true`). */
 export const ADMIN = { email: "admin@turboea.demo", password: "TurboEA!2025" };
+
+/** `E2E_COVERAGE=1`: record the SPA's V8 coverage (ci.yml, `make e2e-coverage`). */
+const COLLECT_COVERAGE = process.env.E2E_COVERAGE === "1";
+/** Raw recordings, one file per test run; `scripts/e2e-coverage.mjs` converts them. */
+export const COVERAGE_DIR = path.join(E2E_DIR, "..", ".e2e-coverage");
 
 export interface DemoData {
   /** "Application Landscape Overview": 8 application cells, 3 relation edges. */
@@ -128,6 +145,29 @@ export function readCanvas(frame: Frame) {
 }
 
 export const test = base.extend<Record<string, never>, { demo: DemoData }>({
+  // The callback is `run`, not Playwright's customary `use`: in a function
+  // named `page`, eslint's rules-of-hooks reads `use(...)` as a React hook.
+  page: async ({ page }, run, testInfo) => {
+    if (!COLLECT_COVERAGE) {
+      await run(page);
+      return;
+    }
+    // Before the first navigation, and kept across the SPA's client-side routing.
+    await page.coverage.startJSCoverage({ resetOnNavigation: false });
+    await run(page);
+    if (page.isClosed()) return;
+    const entries = await page.coverage.stopJSCoverage();
+    // `source` is the chunk text (the converter reads dist/assets/ instead) and
+    // DrawIO's scripts carry tens of MB of ranges per diagram test: both
+    // dropped. `isAppAsset` swallows a non-URL — an eval'd script reports its
+    // `//# sourceURL` name, which must not throw inside the fixture's teardown.
+    const result = entries
+      .filter((entry) => isAppAsset(entry.url))
+      .map(({ url, scriptId, functions }) => ({ url, scriptId, functions }));
+    await fs.mkdir(COVERAGE_DIR, { recursive: true });
+    const name = `${testInfo.testId}-${testInfo.repeatEachIndex}-${testInfo.retry}.json`;
+    await fs.writeFile(path.join(COVERAGE_DIR, name), JSON.stringify({ result }));
+  },
   demo: [
     async ({ playwright }, use) => {
       const api = await playwright.request.newContext({ baseURL: BASE_URL, storageState: STORAGE_STATE });

@@ -94,23 +94,16 @@ jobs:
             terraform:
               - 'deploy/terraform/**'
               - 'scripts/check_deploy_versions.py'
-            # The browser smoke suite: its own files, the frontend build inputs
-            # and the five widget features it drives (frontend/e2e/README in
-            # CLAUDE.md's Testing Conventions). The Dockerfile pins the DrawIO
-            # tag the suite installs.
+            # The browser smoke suite. Its coverage is part of the frontend
+            # figure Frontend Tests enforces (merged with the unit suite's),
+            # so it runs on ANY frontend change, not only on the five widget
+            # features it drives — but not on the `frontend` filter above
+            # as a whole: that one also carries scripts/mutation/** and the
+            # audit-ci config for the mutation and audit jobs, neither of
+            # which can move the figure. The Dockerfile pins the DrawIO tag
+            # the suite installs.
             e2e:
-              - 'frontend/e2e/**'
-              - 'frontend/playwright.config.ts'
-              - 'frontend/package.json'
-              - 'frontend/package-lock.json'
-              - 'frontend/vite.config.ts'
-              - 'frontend/drawio-config/**'
-              - 'frontend/src/features/diagrams/**'
-              - 'frontend/src/features/bpm/**'
-              - 'frontend/src/features/ppm/**'
-              - 'frontend/src/features/reports/**'
-              - 'frontend/src/features/admin/metamodel/**'
-              - 'frontend/src/features/admin/MetamodelAdmin.tsx'
+              - 'frontend/**'
               - 'scripts/e2e/**'
               - 'Dockerfile'
             ci:
@@ -592,7 +585,13 @@ jobs:
   # fail itself, because a skipped required check reads as passing.
   frontend-test:
     name: Frontend Tests
-    needs: [changes, frontend-test-shards]
+    # frontend-e2e is a dependency for its coverage, not its verdict: the
+    # aggregate waits for it, merges its LCOV when it passed, and runs on unit
+    # coverage alone when it failed or was skipped — a red browser suite is
+    # Frontend E2E's own required check, and it is skipped only on a change
+    # that cannot move the frontend figure (the `frontend` filter is wider
+    # than the `e2e` one by scripts/mutation/** and the audit-ci config).
+    needs: [changes, frontend-test-shards, frontend-e2e]
     if: always() && needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -617,6 +616,13 @@ jobs:
           pattern: frontend-blob-*
           merge-multiple: true
           path: frontend/.vitest-reports
+      - name: Download the browser suite's coverage
+        # Outside coverage/, which the vitest merge below cleans first.
+        if: needs.frontend-e2e.result == 'success'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: frontend-e2e-coverage
+          path: frontend/coverage-e2e
       - name: Merge the shards' results and coverage, enforce the floors
         # A missing blob is silent at download, so the count is checked first.
         # The merge re-emits the reporters configured in
@@ -628,11 +634,30 @@ jobs:
           test "$found" -eq "$expected" || { echo "::error::$found of $expected shard reports"; exit 1; }
           npx vitest run --merge-reports --coverage.enabled
         working-directory: frontend
+      - name: Merge the browser suite's coverage into the published figure and enforce its floor
+        # Line union of coverage/lcov.info (unit) and coverage-e2e/lcov.info
+        # (browser) into coverage-merged/, which the diff gate and the badge
+        # read. The merged floor lives in frontend/package.json
+        # (config.coverageFloorMergedLines) and is checked only when Frontend
+        # E2E passed: a red browser suite is its own required check, and
+        # unit-only data would fail the merged floor for the wrong reason. A
+        # missing artifact is silent at download, so it is checked against the
+        # job's result first, like the shard count above.
+        run: |
+          if [ "${{ needs.frontend-e2e.result }}" = "success" ]; then
+            test -f coverage-e2e/lcov.info || { echo "::error::Frontend E2E passed but handed over no coverage"; exit 1; }
+            node scripts/merge-lcov.mjs --out coverage-merged --fail-under-from-package coverage/lcov.info coverage-e2e/lcov.info
+          else
+            echo "Frontend E2E: ${{ needs.frontend-e2e.result }} — unit coverage only, merged floor not checked"
+            node scripts/merge-lcov.mjs --out coverage-merged coverage/lcov.info
+          fi
+        working-directory: frontend
       - name: Coverage summary
         # As in the backend aggregate: after a failed floor, not a failed guard.
         if: always() && steps.shards-ok.outcome == 'success'
         run: |
           echo "## Frontend coverage" >> "$GITHUB_STEP_SUMMARY"
+          echo "Unit suite (the floors in vitest.config.ts):" >> "$GITHUB_STEP_SUMMARY"
           if [ -f coverage/coverage-summary.json ]; then
             jq -r '.total | "| | Covered | Total | % |\n|---|---|---|---|",
               (to_entries[] | "| \(.key) | \(.value.covered) | \(.value.total) | \(.value.pct) |")' \
@@ -640,27 +665,42 @@ jobs:
           else
             echo "No coverage data." >> "$GITHUB_STEP_SUMMARY"
           fi
+          if [ -f coverage-merged/coverage-summary.json ]; then
+            if [ "${{ needs.frontend-e2e.result }}" = "success" ]; then
+              suites="unit + browser suite"
+            else
+              suites="unit suite only — Frontend E2E: ${{ needs.frontend-e2e.result }}"
+            fi
+            floor=$(jq -r '.config.coverageFloorMergedLines // "none"' package.json)
+            jq -r --arg s "$suites" --arg f "$floor" \
+              '.total.lines | "\nPublished figure (\($s)): lines \(.pct)% (\(.covered)/\(.total)), floor \($f)"' \
+              coverage-merged/coverage-summary.json >> "$GITHUB_STEP_SUMMARY"
+          fi
         working-directory: frontend
       # Same gate as the backend job: the lines a PR touches must be ≥ 80%
-      # covered. diff-cover reads the LCOV report vitest.config.ts emits.
+      # covered. diff-cover reads the merged LCOV — unit plus browser suite
+      # when Frontend E2E passed, unit alone otherwise (never looser).
       - name: Diff coverage (changed lines must be tested)
         if: github.event_name == 'pull_request'
         run: |
           git fetch --no-tags origin "${{ github.base_ref }}"
           pip install diff-cover==10.6.0
-          diff-cover coverage/lcov.info --compare-branch="origin/${{ github.base_ref }}" \
+          diff-cover coverage-merged/lcov.info --compare-branch="origin/${{ github.base_ref }}" \
             --fail-under=80 --format markdown:diff-cover.md
           cat diff-cover.md >> "$GITHUB_STEP_SUMMARY"
         working-directory: frontend
-      # On main, hand the line coverage to the coverage-badges job (as in the
-      # backend aggregate: only after the floors passed).
+      # On main, hand the merged line coverage to the coverage-badges job —
+      # only with the browser suite in it. Frontend E2E runs on every push to
+      # main that touched frontend/**; a push where it failed publishes
+      # nothing and the badge keeps its last value instead of dropping to the
+      # unit-only figure.
       - name: Record the total for the coverage badge
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.frontend-e2e.result == 'success'
         run: |
           mkdir -p ../coverage-badge
-          jq -r '.total.lines.pct' coverage/coverage-summary.json > ../coverage-badge/frontend
+          jq -r '.total.lines.pct' coverage-merged/coverage-summary.json > ../coverage-badge/frontend
         working-directory: frontend
-      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.frontend-e2e.result == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-badge-frontend
@@ -679,6 +719,13 @@ jobs:
   frontend-e2e:
     name: Frontend E2E
     needs: changes
+    # The e2e filter is frontend/** plus the suite's own inputs: this job's
+    # coverage is part of the figure Frontend Tests enforces and the README
+    # badge shows, so it runs wherever a frontend change can move that
+    # figure. A PR the `frontend` filter catches for other reasons
+    # (scripts/mutation/**) skips it, and the aggregate then merges unit
+    # coverage alone. It finishes minutes before the unit shards, so the
+    # critical path is unchanged.
     if: needs.changes.outputs.e2e == 'true'
     # Pinned, not `ubuntu-latest`: `playwright install --with-deps` installs
     # Chromium's system libraries from a per-release apt list, and a runner
@@ -747,6 +794,24 @@ jobs:
           exit 1
       - run: npx playwright test
         working-directory: frontend
+        env:
+          # The page fixture (e2e/fixtures.ts) records Chromium's V8 coverage
+          # of the SPA's /assets/*.js into .e2e-coverage/ for the step below.
+          E2E_COVERAGE: "1"
+      - name: Convert the browser coverage to LCOV
+        # Remaps the V8 ranges through the build's source maps
+        # (dist/assets/*.js.map) into coverage-e2e/lcov.info under the same
+        # include/exclude as frontend/vitest.config.ts; Frontend Tests merges
+        # it with the unit suite's. Fails when nothing was recorded.
+        run: node scripts/e2e-coverage.mjs
+        working-directory: frontend
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frontend-e2e-coverage
+          path: frontend/coverage-e2e/lcov.info
+          if-no-files-found: error
+          overwrite: true # "Re-run failed jobs" uploads the same name again
+          retention-days: 1
       - name: Upload traces, screenshots and the backend log
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -855,14 +920,20 @@ jobs:
               mcp) label="MCP server coverage" ;;
               *) label="$suite coverage" ;;
             esac
-            # --argjson rejects anything that is not a number.
-            jq -n --arg label "$label" --argjson pct "$(cat "$total")" '{
+            # --argjson rejects anything that is not a number. The colours
+            # follow Google's coverage guidelines (Testing Blog, "Code
+            # Coverage Best Practices", 2020): 90% exemplary, 75%
+            # commendable, 60% acceptable, so every acceptable figure is a
+            # shade of green and only one below 60 warns. The colour is
+            # picked from the rounded figure the badge shows, never the raw
+            # one, or 69.6 would read "70%" in the colour of the band below.
+            jq -n --arg label "$label" --argjson pct "$(cat "$total")" '
+              ($pct | round) as $shown | {
               schemaVersion: 1,
               label: $label,
-              message: "\($pct | round)%",
-              color: (if $pct >= 90 then "brightgreen" elif $pct >= 80 then "green"
-                      elif $pct >= 70 then "yellowgreen" elif $pct >= 60 then "yellow"
-                      elif $pct >= 50 then "orange" else "red" end)
+              message: "\($shown)%",
+              color: (if $shown >= 90 then "brightgreen" elif $shown >= 75 then "green"
+                      elif $shown >= 60 then "yellowgreen" else "orange" end)
             }' > "$suite.json"
           done
           git add -A
@@ -1013,7 +1084,10 @@ jobs:
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # Stryker's single-threaded dry run alone may take up to its
+    # dryRunTimeoutMinutes (60, stryker.config.json) on a widely imported
+    # module; the mutants need room after it, as in backend-mutation.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1031,7 +1105,7 @@ jobs:
         run: |
           git fetch --no-tags origin "${{ github.base_ref }}"
           python3 scripts/mutation/changed_lines.py --base "origin/${{ github.base_ref }}" \
-            --output mutation-changed.json -- frontend/src
+            --output mutation-changed.json -- frontend/src frontend/scripts
           python3 scripts/mutation/stryker_scope.py args --changed mutation-changed.json \
             > mutation-mutate.txt
       - name: Mutate the changed lines

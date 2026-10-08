@@ -1,5 +1,5 @@
 .PHONY: help dev dev-backend dev-frontend lint lint-backend lint-frontend \
-	test test-backend test-frontend test-unit e2e e2e-drawio \
+	test test-backend test-frontend test-unit e2e e2e-drawio e2e-coverage \
 	mutation-diff mutation-backend mutation-mcp mutation-frontend mutation-clean build format typecheck \
 	lock-deps audit docker-up docker-down docker-build pull-prod up-prod down-prod up-dev down-dev build-dev backup
 
@@ -54,13 +54,20 @@ e2e: ## Run the browser smoke suite against a backend on :8000 (start it with SE
 	$(MAKE) e2e-drawio
 	cd frontend && npx playwright test
 
+e2e-coverage: ## Run the browser smoke suite with V8 coverage and write frontend/coverage-e2e/lcov.info (backend on :8000 as for e2e)
+	rm -rf frontend/.e2e-coverage frontend/coverage-e2e
+	cd frontend && npm run build
+	$(MAKE) e2e-drawio
+	cd frontend && E2E_COVERAGE=1 npx playwright test
+	cd frontend && node scripts/e2e-coverage.mjs
+
 # ── Mutation testing (scripts/mutation/README.md) ───────────────────────
 # BASE is what a change is compared with; the backend targets need the test
 # database scripts/test.sh starts (or any Postgres on POSTGRES_*).
 BASE ?= origin/main
 
 mutation-diff: ## Mutation-test the functions your branch changed, scored like the PR gate
-	python scripts/mutation/changed_lines.py --base $(BASE) --output mutation-changed.json -- backend/app mcp-server/turbo_ea_mcp frontend/src
+	python scripts/mutation/changed_lines.py --base $(BASE) --output mutation-changed.json -- backend/app mcp-server/turbo_ea_mcp frontend/src frontend/scripts
 	python scripts/mutation/mutmut_scope.py run --suite backend --changed mutation-changed.json
 	python scripts/mutation/mutmut_scope.py collect --suite backend --changed mutation-changed.json --output mutation-backend.json
 	python scripts/mutation/gate.py --suite backend --scope diff --records mutation-backend.json

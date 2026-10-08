@@ -257,9 +257,21 @@ Each of these was found the hard way while wiring it up; keep them.
   dies of `MemoryError`, which counts as killed, instead of starving the runner
   until GitHub shuts it down. Stryker gets no such cap, because V8 reserves
   more address space than any sensible limit.
+- **The frontend coverage tooling is in Stryker's scope too.** `stryker.config.json`
+  names `scripts/app-asset.mjs`, `scripts/e2e-coverage.mjs` and
+  `scripts/merge-lcov.mjs` beside `src/**` — the three files `Frontend Tests`
+  gates on (the merged figure, its floor, the diff gate's input) — so the PR
+  job diffs `frontend/src` *and* `frontend/scripts`, and `mutable_files` walks
+  both for the nightly. The generator scripts next to them stay out: they are
+  named file by file, never as `scripts/**`.
 - **Stryker's dry run** runs every test related to the mutated files, which
-  for a shared `lib/` helper is a large part of the suite, so
-  `dryRunTimeoutMinutes` is raised from its default of 5.
+  for a shared `lib/` helper is a large part of the suite, and it runs them on
+  ONE thread. `dryRunTimeoutMinutes` is therefore 60, not the default 5:
+  measured on 2026-10-05, the dry run for `src/api/client.ts` ran its 4,027
+  related tests in 27 minutes, and the whole suite (7,443 tests) extrapolates
+  to about 50. A module nearly every test imports (`MaterialSymbol`, the hooks)
+  sits near that upper end; under 30 minutes its chunk would time out every
+  night and never be measured.
 - **mutmut is pinned exactly** because `mutmut_scope.py` reads its `results`
   and `show` output. To bump it: change both pins, run
   `backend/tests/core/test_mutation_scripts.py`, then
