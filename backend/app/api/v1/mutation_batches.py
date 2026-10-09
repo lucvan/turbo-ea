@@ -146,13 +146,12 @@ async def open_batch(
         confirmation=confirmation,
     )
     if preview is not None:
-        preview.summary = {
-            **preview.summary,
-            CONFIRMATION_KEY: {
-                **preview.summary[CONFIRMATION_KEY],
-                "redeemed_by_batch_id": str(batch.id),
-            },
+        redeemed = dict(preview.summary or {})
+        redeemed[CONFIRMATION_KEY] = {
+            **(redeemed.get(CONFIRMATION_KEY) or {}),
+            "redeemed_by_batch_id": str(batch.id),
         }
+        preview.summary = redeemed
     await db.commit()
     return MutationBatchOut(**batch_to_dict(batch, actor_display_name=user.display_name))
 
