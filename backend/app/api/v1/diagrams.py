@@ -60,6 +60,10 @@ _PRIVATE_CELL_ATTRS = (
     "cardId",
     "cardName",
     "cardDetail",
+    # Only ever on a still-pending cell: the description typed in the editor's
+    # Create-card dialog, held until Sync posts it (#1210). Not part of the
+    # picture any more than the name stamp is.
+    "cardDescription",
     "cardType",
     "relationId",
     "relationType",

@@ -1,8 +1,11 @@
 /**
  * The DrawIO diagram editor: the demo landscape loads with its cards and
  * relations, a card inserted from the context menu reaches the saved XML, and
- * the chevron's Expand menu adds a related card as a child of the expanded one.
- * Mutations run on a copy of the demo diagram that `afterAll` deletes.
+ * the chevron's Expand menu adds a related card as a child of the expanded one,
+ * the Show on card menu's Alias line reaches the shape, and a card created on
+ * the canvas keeps its description when it is pushed to the inventory.
+ * Mutations run on a copy of the demo diagram that `afterAll` deletes, which
+ * also clears the alias one spec sets and deletes the card another creates.
  */
 import { drawio, expect, gotoApp, readCanvas, test, waitForDrawio, BASE_URL, STORAGE_STATE } from "./fixtures";
 import { t } from "./i18n";
@@ -17,10 +20,16 @@ test.describe("diagram editor", () => {
     page.on("dialog", (dialog) => dialog.accept().catch(() => {}));
   });
 
+  /** The card the alias spec decorates, restored to no alias afterwards. */
+  let aliasedCardId: string | null = null;
+  /** The card the create-and-sync spec pushes to the inventory. */
+  let createdCardId: string | null = null;
+
   test.afterAll(async ({ playwright }) => {
-    if (!copyId) return;
     const api = await playwright.request.newContext({ baseURL: BASE_URL, storageState: STORAGE_STATE });
-    await api.delete(`/api/v1/diagrams/${copyId}`);
+    if (copyId) await api.delete(`/api/v1/diagrams/${copyId}`);
+    if (aliasedCardId) await api.patch(`/api/v1/cards/${aliasedCardId}`, { data: { alias: null } });
+    if (createdCardId) await api.delete(`/api/v1/cards/${createdCardId}`);
     await api.dispose();
   });
 
@@ -131,5 +140,86 @@ test.describe("diagram editor", () => {
     await expect
       .poll(async () => (await readCanvas(frame)).cards.filter((c) => c.parentGroupCell === sapCell!.cellId).length)
       .toBeGreaterThan(0);
+  });
+
+  test("shows the alias on a card shape once the Alias line is ticked", async ({ page, demo, playwright }) => {
+    expect(copyId, "the earlier spec creates the copy").not.toBeNull();
+    // The demo landscape carries no aliases: give SAP S/4HANA one for the run.
+    const alias = `E2E-${Date.now().toString(36)}`;
+    const api = await playwright.request.newContext({ baseURL: BASE_URL, storageState: STORAGE_STATE });
+    const set = await api.patch(`/api/v1/cards/${demo.sapId}`, { data: { alias } });
+    expect(set.ok(), `PATCH /cards answered ${set.status()}`).toBeTruthy();
+    aliasedCardId = demo.sapId;
+    await api.dispose();
+
+    await gotoApp(page, `/diagrams/${copyId}/edit`);
+    const frame = await waitForDrawio(page);
+    const detailRows = () =>
+      frame.evaluate((cardId) => {
+        type Cell = { value?: { getAttribute?: (k: string) => string | null } };
+        const graph = (window as unknown as { __turboGraph: { getModel: () => { cells: Record<string, Cell> } } })
+          .__turboGraph;
+        const cell = Object.values(graph.getModel().cells).find(
+          (c) => c.value?.getAttribute?.("cardId") === cardId,
+        );
+        return cell?.value?.getAttribute?.("cardDetail") ?? "";
+      }, demo.sapId);
+    expect(await detailRows()).not.toContain(alias);
+
+    await page.getByRole("button", { name: t("common:cardDisplay.showOnCard") }).click();
+    await page.getByRole("menu").getByText(t("common:labels.alias"), { exact: true }).click();
+    await page.keyboard.press("Escape");
+
+    // The display pass re-reads the canvas cards and composes the rows onto
+    // the shape; the rows ride on the cell as data as well as in the label.
+    await expect.poll(detailRows, { timeout: 30_000 }).toContain(alias);
+    expect(JSON.parse(await detailRows()) as { label: string; value: string }[]).toContainEqual({
+      label: t("common:labels.alias"),
+      value: alias,
+    });
+  });
+
+  test("creates a card with a description on the canvas and pushes it to the inventory", async ({ page }) => {
+    expect(copyId, "the earlier spec creates the copy").not.toBeNull();
+    await gotoApp(page, `/diagrams/${copyId}/edit`);
+    const frame = await waitForDrawio(page);
+
+    const container = drawio(page).locator(".geDiagramContainer");
+    const box = await container.boundingBox();
+    if (!box) throw new Error("no canvas box");
+    await container.click({ button: "right", position: { x: box.width - 60, y: box.height - 60 } });
+    await drawio(page).locator("td.mxPopupMenuItem", { hasText: "Create New Card" }).click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    const name = `E2E pending ${Date.now().toString(36)}`;
+    const description = "Typed in the Create-card dialog (#1210)";
+    await dialog.getByRole("combobox").click();
+    await page.getByRole("option", { name: "Application", exact: true }).click();
+    await dialog.getByLabel(t("common:labels.name")).fill(name);
+    await dialog.getByLabel(t("diagrams:createOnDiagram.descriptionOptional")).fill(description);
+    await dialog.getByRole("button", { name: t("diagrams:createOnDiagram.addToDiagram") }).click();
+
+    await expect
+      .poll(async () => (await readCanvas(frame)).cards.some((c) => c.cardId?.startsWith("pending-")))
+      .toBe(true);
+
+    // Push the one pending card from the sync panel and read what was POSTed.
+    await page.getByRole("button", { name: t("diagrams:editor.toolbar.unsyncedCount", { count: 1 }) }).click();
+    const created = page.waitForResponse(
+      (r) => r.url().endsWith("/api/v1/cards") && r.request().method() === "POST",
+      { timeout: 30_000 },
+    );
+    await page.getByRole("button", { name: t("diagrams:sync.pushToInventory") }).first().click();
+    const response = await created;
+    expect(response.ok(), `POST /cards answered ${response.status()}`).toBeTruthy();
+    const card = (await response.json()) as { id: string; name: string; description: string | null };
+    createdCardId = card.id;
+    expect(card.name).toBe(name);
+    expect(card.description).toBe(description);
+    // The cell now carries the real id and no pending flag.
+    await expect
+      .poll(async () => (await readCanvas(frame)).cards.some((c) => c.cardId === card.id))
+      .toBe(true);
   });
 });

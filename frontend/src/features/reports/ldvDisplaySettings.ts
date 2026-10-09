@@ -19,6 +19,10 @@ export interface LdvDisplaySettings {
   showType: boolean;
   /** Show the card's subtype ("Microservice", "SaaS", …) under its name. */
   showSubtype: boolean;
+  /** Show the card's alias — its other name — as an `Alias:` row under its
+   *  name. Off by default: a view nobody configured must look as it always
+   *  did, and most landscapes carry no aliases at all. */
+  showAlias: boolean;
   showLifecycle: boolean;
   /**
    * Show a minimalistic marker on each card indicating it has a hierarchical
@@ -66,6 +70,7 @@ const KEY = "tea.ldv.display.v3";
 export const LDV_DEFAULT_SETTINGS: LdvDisplaySettings = {
   showType: true,
   showSubtype: false,
+  showAlias: false,
   showLifecycle: true,
   showHierarchyMarkers: true,
   showCardLogos: true,
@@ -136,5 +141,10 @@ export function useLdvSettings(): [LdvDisplaySettings, (patch: Partial<LdvDispla
  * diagram's `cardLabels` so it opens showing the rows that were on screen.
  */
 export function toCardLabels(s: LdvDisplaySettings): CardLabelSettings {
-  return { showType: s.showType, showSubtype: s.showSubtype, fields: s.extraFields };
+  return {
+    showType: s.showType,
+    showSubtype: s.showSubtype,
+    showAlias: s.showAlias,
+    fields: s.extraFields,
+  };
 }

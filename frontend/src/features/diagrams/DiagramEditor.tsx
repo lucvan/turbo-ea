@@ -112,6 +112,7 @@ import type {
 } from "./drawio-shapes";
 import { edgeIncoming, groupRelationsByOtherCard, pruneDeletedRelations } from "./expandChildren";
 import { relationCreatePayload } from "./relationSync";
+import { cardCreatePayload } from "./cardSync";
 import ExpandMenu from "./ExpandMenu";
 import type { ExpandMenuPick, ExpandMenuTarget } from "./ExpandMenu";
 import ColorBySelector from "./ColorBySelector";
@@ -139,6 +140,7 @@ import {
   useTypeLabel,
 } from "@/hooks/useResolveLabel";
 import {
+  aliasLine,
   buildFieldCatalog,
   DEFAULT_CARD_LABELS,
   showsCardLogos,
@@ -2297,6 +2299,7 @@ export default function DiagramEditor() {
           typeLabel: typeLabel(typeInfo) || p.type,
           typeColor: typeInfo?.color || "#999",
           name: p.name,
+          description: p.description,
         };
       }),
     );
@@ -2339,6 +2342,7 @@ export default function DiagramEditor() {
           tempId,
           type: data.type,
           name: data.name,
+          description: data.description,
           color,
           icon: typeInfo?.icon,
         });
@@ -2370,6 +2374,7 @@ export default function DiagramEditor() {
         tempId,
         type: data.type,
         name: data.name,
+        description: data.description,
         color,
         icon: typeInfo?.icon,
         x,
@@ -2454,10 +2459,9 @@ export default function DiagramEditor() {
       try {
         const scanned = scanDiagramItems(frame);
         const raw = scanned.pendingCards.find((p) => p.cellId === cellId);
-        const resp = await api.post<Card>("/cards", {
-          type: item.type,
-          name: item.name,
-        });
+        // The cell is the authority (it holds the description); the panel's
+        // snapshot is the fallback should the cell have gone meanwhile.
+        const resp = await api.post<Card>("/cards", cardCreatePayload(raw ?? item));
         markCellSynced(frame, cellId, resp.id, item.typeColor);
         // Attach chevron now that it has a real ID and the per-relation
         // expand menu can resolve its neighbours.
@@ -2560,10 +2564,7 @@ export default function DiagramEditor() {
       for (const p of pfs) {
         const typeInfo = fsTypesRef.current.find((t) => t.key === p.type);
         try {
-          const resp = await api.post<Card>("/cards", {
-            type: p.type,
-            name: p.name,
-          });
+          const resp = await api.post<Card>("/cards", cardCreatePayload(p));
           markCellSynced(frame, p.cellId, resp.id, typeInfo?.color || "#999");
           const insertedCellId = p.cellId;
           const insertedCardId = resp.id;
@@ -3227,6 +3228,10 @@ export default function DiagramEditor() {
           label: t("common:cardDisplay.subtypeLine"),
           value: subtypeLabel(card.type, card.subtype),
         });
+      }
+      if (cardLabels.showAlias) {
+        const line = aliasLine(card.alias, t("common:labels.alias"));
+        if (line) lines.push(line);
       }
       for (const key of cardLabels.fields) {
         const meta = catalog.get(key);

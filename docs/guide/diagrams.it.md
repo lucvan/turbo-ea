@@ -94,7 +94,7 @@ Una legenda fluttuante in basso a sinistra mostra una scala per ogni regola atti
 
 #### Mostra sulla scheda
 
-Un secondo pulsante nella barra strumenti, **Mostra sulla scheda**, decide **cosa dice ogni forma**. Spuntate il **tipo di scheda**, il **sottotipo** o qualsiasi attributo dei tipi di scheda presenti sulla tela: ogni forma acquisirà piccole righe di dettaglio sotto il proprio nome. I campi sono elencati sotto il tipo di scheda a cui appartengono; un campo condiviso da più di questi tipi è raggruppato sotto **Comuni**. È un pulsante distinto da **Colora per**, così nessuna delle due liste costringe a scorrere l'altra. **Cancella tutto** toglie tutte le spunte in una volta.
+Un secondo pulsante nella barra strumenti, **Mostra sulla scheda**, decide **cosa dice ogni forma**. Spuntate il **tipo di scheda**, il **sottotipo**, l'**alias** (mostrato come riga *Alias:*, solo sulle schede che ne hanno uno) o qualsiasi attributo dei tipi di scheda presenti sulla tela: ogni forma acquisirà piccole righe di dettaglio sotto il proprio nome. I campi sono elencati sotto il tipo di scheda a cui appartengono; un campo condiviso da più di questi tipi è raggruppato sotto **Comuni**. È un pulsante distinto da **Colora per**, così nessuna delle due liste costringe a scorrere l'altra. **Cancella tutto** toglie tutte le spunte in una volta.
 
 Ogni selezione viene disegnata sulla forma, e la forma **cresce per contenerla**. Due righe entrano già in una scheda, quindi nulla si muove finché non ne spuntate una terza; da lì ogni scheda diventa un po' più alta per selezione e si riduce quando ne togliete una. Una scheda che avete ridimensionato a mano mantiene la vostra altezza: guadagna o restituisce soltanto lo spazio di una riga.
 

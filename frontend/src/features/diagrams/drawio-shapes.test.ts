@@ -2265,6 +2265,21 @@ describe("normaliseEditedCardLabel", () => {
     const cells = { plain: labelVertex("plain", { label: "Just a box" }) };
     expect(normaliseEditedCardLabel(labelFrame(cells), "plain")).toBeNull();
   });
+
+  it("keeps a pending card's description across a hand-typed rename", () => {
+    const cells = {
+      p: labelVertex("p", {
+        cardId: "pending-1",
+        pending: "1",
+        cardType: "Application",
+        cardName: "Old Name",
+        label: "Hand Typed",
+        cardDescription: "keep me",
+      }),
+    };
+    expect(normaliseEditedCardLabel(labelFrame(cells), "p")).toBe("Hand Typed");
+    expect(cells.p.value.getAttribute("cardDescription")).toBe("keep me");
+  });
 });
 
 describe("scanDiagramItems — composed labels", () => {
@@ -2293,6 +2308,31 @@ describe("scanDiagramItems — composed labels", () => {
       }),
     });
     expect(scanDiagramItems(frame).pendingCards[0].name).toBe("Draft App");
+  });
+});
+
+describe("scanDiagramItems — pending description", () => {
+  const pendingAttrs = {
+    cardId: "pending-x",
+    cardType: "Application",
+    cardName: "Draft App",
+    label: "Draft App",
+    pending: "1",
+  };
+
+  it("reports the description the Create-card dialog stored, so Sync can POST it (#1210)", () => {
+    const frame = scanFrame({
+      p: scanVertex("p", { ...pendingAttrs, cardDescription: "Hosts the ERP" }),
+    });
+    expect(scanDiagramItems(frame).pendingCards[0]).toMatchObject({
+      name: "Draft App",
+      description: "Hosts the ERP",
+    });
+  });
+
+  it("leaves the description undefined on a pending card that has none", () => {
+    const frame = scanFrame({ p: scanVertex("p", pendingAttrs) });
+    expect(scanDiagramItems(frame).pendingCards[0].description).toBeUndefined();
   });
 });
 
@@ -2335,6 +2375,25 @@ describe("unlinking collapses the detail rows", () => {
     expect(dedupClonedCell(frame, "c1", false)).toEqual({ mode: "unlinked" });
     expect(cells.c1.value.getAttribute("label")).toBe("NexaCore ERP");
     expect(cells.c1.geometry.height).toBe(60);
+  });
+
+  it("a pasted pending clone keeps its description under its fresh temp id", () => {
+    // The clone syncs as a separate card with the same text — the pending
+    // branch only re-mints the id.
+    const cells = {
+      c1: labelVertex("c1", {
+        cardId: "pending-1",
+        pending: "1",
+        cardType: "Application",
+        cardName: "Draft",
+        label: "Draft",
+        cardDescription: "same notes",
+      }),
+    };
+    const result = dedupClonedCell(labelFrame(cells), "c1", true);
+    expect(result?.mode).toBe("regenerated");
+    expect(cells.c1.value.getAttribute("cardId")).not.toBe("pending-1");
+    expect(cells.c1.value.getAttribute("cardDescription")).toBe("same notes");
   });
 });
 

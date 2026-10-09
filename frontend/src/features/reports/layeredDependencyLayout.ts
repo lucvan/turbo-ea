@@ -50,6 +50,10 @@ export interface GNode {
   type: string;
   /** Metamodel subtype key, when the card has one. */
   subtype?: string;
+  /** The card's other name. Sent by `GET /reports/dependencies`; a graph
+   *  built elsewhere (TurboLens) may leave it out, so the alias row is simply
+   *  not offered there. */
+  alias?: string | null;
   lifecycle?: Record<string, string>;
   attributes?: Record<string, unknown>;
   parent_id?: string | null;
