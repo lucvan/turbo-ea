@@ -14,8 +14,14 @@ Application card type and creates cards::
         --db-dsn postgresql://turboea:turboea@127.0.0.1:5433/turboea_e2e
 
 ``--mcp-src`` points at another checkout's ``mcp-server`` directory, to run the
-same checks against a different version. Exit status is 0 only if every check
-passed.
+same checks against a different version. ``--mcp-command`` replaces the MCP
+server process altogether, for example with the published image::
+
+    --mcp-command 'docker run -i --rm --network NET -e TURBO_EA_URL=http://backend:8000
+                   -e TURBO_EA_EMAIL={email} -e TURBO_EA_PASSWORD={password}
+                   IMAGE python -m turbo_ea_mcp --stdio'
+
+Exit status is 0 only if every check passed.
 """
 
 from __future__ import annotations
@@ -24,6 +30,7 @@ import argparse
 import asyncio
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -137,20 +144,24 @@ class Mcp:
 
 @asynccontextmanager
 async def mcp_session(args, email: str):
-    env = {
-        **os.environ,
-        "TURBO_EA_URL": args.backend_url,
-        "TURBO_EA_EMAIL": email,
-        "TURBO_EA_PASSWORD": PASSWORD,
-        "PYTHONPATH": str(args.mcp_src),
-    }
-    params = StdioServerParameters(
-        command=sys.executable,
-        args=["-m", "turbo_ea_mcp", "--stdio"],
-        env=env,
-        # ``-m`` puts the working directory first on the import path.
-        cwd=str(args.mcp_src),
-    )
+    if args.mcp_command:
+        command = shlex.split(args.mcp_command.format(email=email, password=PASSWORD))
+        params = StdioServerParameters(command=command[0], args=command[1:], env=dict(os.environ))
+    else:
+        env = {
+            **os.environ,
+            "TURBO_EA_URL": args.backend_url,
+            "TURBO_EA_EMAIL": email,
+            "TURBO_EA_PASSWORD": PASSWORD,
+            "PYTHONPATH": str(args.mcp_src),
+        }
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "turbo_ea_mcp", "--stdio"],
+            env=env,
+            # ``-m`` puts the working directory first on the import path.
+            cwd=str(args.mcp_src),
+        )
     with open(os.devnull, "w") as devnull:
         async with stdio_client(params, errlog=devnull) as (read, write):
             async with ClientSession(read, write) as session:
@@ -562,6 +573,10 @@ def main() -> int:
     parser.add_argument("--backend-url", required=True)
     parser.add_argument("--db-dsn", required=True)
     parser.add_argument("--mcp-src", type=Path, default=Path(__file__).resolve().parents[2])
+    parser.add_argument(
+        "--mcp-command",
+        help="Command that runs the MCP server over stdio; {email} and {password} are filled in",
+    )
     args = parser.parse_args()
     asyncio.run(run(args))
     failed = [r for r in RESULTS if not r[1]]
