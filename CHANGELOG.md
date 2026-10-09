@@ -5,6 +5,14 @@ All notable changes to Turbo EA are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.158.0] - 2026-10-09
+
+### Added
+- Diagrams and Dependencies report: **Show on card** can now show each card's alias as an "Alias" line under its name — on DrawIO card shapes, on Layered Dependency View nodes and in their tooltip — and the choice travels with **Create diagram**. Cards without an alias look exactly as before.
+
+### Fixed
+- Diagram editor: the description typed when creating a new card on the canvas is saved with the card when it is pushed to the inventory, by **Sync** and **Sync all** alike; it used to be dropped (#1210).
+
 ## [2.157.11] - 2026-10-09
 
 ### Security

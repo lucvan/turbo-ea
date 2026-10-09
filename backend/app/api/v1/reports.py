@@ -2253,6 +2253,9 @@ async def dependencies(
                 "name": card.name,
                 "type": card.type,
                 "subtype": card.subtype,
+                # The card's other name: the Layered Dependency View offers it
+                # as an "Alias" row under the name, like the subtype (#1211).
+                "alias": card.alias,
                 "lifecycle": lc_view(card),
                 "attributes": card.attributes,
                 "parent_id": str(card.parent_id) if card.parent_id else None,

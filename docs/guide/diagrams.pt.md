@@ -94,7 +94,7 @@ Uma legenda flutuante no canto inferior esquerdo mostra uma escala por regra ati
 
 #### Mostrar no cartão
 
-Um segundo botão da barra de ferramentas, **Mostrar no cartão**, decide **o que cada forma diz**. Assinale o **tipo de cartão**, o **subtipo** ou qualquer atributo dos tipos de cartão presentes na tela, e cada forma ganha pequenas linhas de detalhe sob o seu nome. Os campos são listados sob o tipo de cartão a que pertencem; um campo partilhado por vários desses tipos é agrupado sob **Comuns**. É um botão separado de **Colorir por**, para que nenhuma das duas listas obrigue a percorrer a outra. **Limpar tudo** desmarca todas as caixas de uma só vez.
+Um segundo botão da barra de ferramentas, **Mostrar no cartão**, decide **o que cada forma diz**. Assinale o **tipo de cartão**, o **subtipo**, o **alias** (mostrado como uma linha *Alias:*, apenas nos cartões que o têm) ou qualquer atributo dos tipos de cartão presentes na tela, e cada forma ganha pequenas linhas de detalhe sob o seu nome. Os campos são listados sob o tipo de cartão a que pertencem; um campo partilhado por vários desses tipos é agrupado sob **Comuns**. É um botão separado de **Colorir por**, para que nenhuma das duas listas obrigue a percorrer a outra. **Limpar tudo** desmarca todas as caixas de uma só vez.
 
 Cada seleção é desenhada na forma, e a forma **cresce para a acolher**. Duas linhas já cabem num cartão, pelo que nada se move até assinalar uma terceira; a partir daí cada cartão fica um pouco mais alto por seleção e volta a encolher quando desmarca uma. Um cartão que tenha redimensionado à mão mantém a sua altura: apenas ganha ou devolve o espaço de uma linha.
 

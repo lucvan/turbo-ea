@@ -168,10 +168,31 @@ export interface CardLabelSettings {
    * turned logos off".
    */
   showLogos?: boolean;
+  /**
+   * Show the card's alias — its other name — as an `Alias:` row under the
+   * name. A card without one prints nothing. Optional like `showType`, so a
+   * diagram saved before the option existed reads as off.
+   */
+  showAlias?: boolean;
   fields: string[];
 }
 
 export const DEFAULT_CARD_LABELS: CardLabelSettings = { fields: [] };
+
+/**
+ * The `Alias:` row for a card, or `null` when it has no alias to show.
+ *
+ * Both surfaces build the row here — the DrawIO editor and the Layered
+ * Dependency View — so "no alias means no row" cannot drift between them.
+ */
+export function aliasLine(
+  alias: string | null | undefined,
+  label: string,
+): DisplayLine | null {
+  const value = alias?.trim();
+  if (!value) return null;
+  return { label, value };
+}
 
 /** Whether logos should be drawn, defaulting on for settings that predate it. */
 export function showsCardLogos(s: CardLabelSettings | undefined): boolean {
@@ -185,5 +206,5 @@ export function showsCardLogos(s: CardLabelSettings | undefined): boolean {
  *  logo-only diagram grow label space for rows it has none of. */
 export function hasCardLabelLines(s: CardLabelSettings | undefined): boolean {
   if (!s) return false;
-  return Boolean(s.showType || s.showSubtype || s.fields.length > 0);
+  return Boolean(s.showType || s.showSubtype || s.showAlias || s.fields.length > 0);
 }
