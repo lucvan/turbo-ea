@@ -225,6 +225,14 @@ describe("LdvNode card logo", () => {
     expect(getComputedStyle(nameEl).webkitLineClamp).toBe("1");
   });
 
+  it("prints an Alias caption like any other detail line (#1211)", () => {
+    // The alias row is built upstream as a plain `{label, value}` line, so
+    // the node needs no rule of its own — this pins the contract it relies on.
+    renderNode({ extraLines: [{ label: "Alias", value: "CRM-v2" }] });
+    expect(screen.getByText("Alias:")).toBeInTheDocument();
+    expect(screen.getByText(/CRM-v2/)).toBeInTheDocument();
+  });
+
   it("falls back to the plain type icon when the image fails to load", () => {
     // A wiped volume or a 404 must land on exactly the card this app drew
     // before logos existed — never a broken-image glyph.

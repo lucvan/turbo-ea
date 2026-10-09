@@ -122,12 +122,13 @@ export default function ShowOnCardSelector({
     labels.fields.length +
     (labels.showType ? 1 : 0) +
     (labels.showSubtype ? 1 : 0) +
+    (labels.showAlias ? 1 : 0) +
     extraLines.filter((l) => l.checked).length;
 
   /* One onChange for everything the shared settings own, so the store takes a
      single write and the user gets one undo step rather than one per tick. */
   const clearAll = () => {
-    onChange({ ...labels, showType: false, showSubtype: false, fields: [] });
+    onChange({ ...labels, showType: false, showSubtype: false, showAlias: false, fields: [] });
     for (const l of extraLines) l.onSet(false);
   };
 
@@ -188,6 +189,15 @@ export default function ShowOnCardSelector({
       checked={!!labels.showSubtype}
       label={t("cardDisplay.subtypeLine")}
       onToggle={() => onChange({ ...labels, showSubtype: !labels.showSubtype })}
+    />,
+    // The card's other name. A card column rather than an attribute, so the
+    // field catalogue below never offers it — a fixed row like type and
+    // subtype, and the same word card detail prints over it (#1211).
+    <CheckRow
+      key="__alias"
+      checked={!!labels.showAlias}
+      label={t("labels.alias")}
+      onToggle={() => onChange({ ...labels, showAlias: !labels.showAlias })}
     />,
     ...extraLines.map((l) => (
       <CheckRow

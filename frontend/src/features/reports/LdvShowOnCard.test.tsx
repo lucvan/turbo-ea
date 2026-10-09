@@ -57,6 +57,7 @@ describe("LdvShowOnCard", () => {
     expect(update).toHaveBeenCalledWith({
       showType: true,
       showSubtype: false,
+      showAlias: false,
       extraFields: ["owner"],
     });
   });
@@ -68,6 +69,7 @@ describe("LdvShowOnCard", () => {
     expect(update).toHaveBeenCalledWith({
       showType: true,
       showSubtype: false,
+      showAlias: false,
       extraFields: [],
     });
   });
@@ -79,6 +81,25 @@ describe("LdvShowOnCard", () => {
     // Its own patch — lifecycle is not part of the shared label shape, so it
     // must not be folded into the extraFields write.
     expect(update).toHaveBeenCalledWith({ showLifecycle: false });
+  });
+
+  it("writes the alias switch to the store (#1211)", async () => {
+    const { update } = setup();
+    const menu = await openMenu();
+    await userEvent.click(within(menu).getByText("Alias"));
+    expect(update).toHaveBeenCalledWith({
+      showType: true,
+      showSubtype: false,
+      showAlias: true,
+      extraFields: [],
+    });
+  });
+
+  it("counts the alias line", () => {
+    setup({ showAlias: true, showLifecycle: false });
+    // The default type line plus the alias; the lifecycle line is off so the
+    // count reads 1 if the alias is not counted.
+    expect(screen.getByRole("button", { name: "Show on card" })).toHaveTextContent("2");
   });
 
   it("counts every line the card is currently showing", () => {
@@ -93,12 +114,18 @@ describe("LdvShowOnCard", () => {
   });
 
   it("clears the picked fields and the lifecycle line together", async () => {
-    const { update } = setup({ showLifecycle: true, extraFields: ["owner"], showType: true });
+    const { update } = setup({
+      showLifecycle: true,
+      extraFields: ["owner"],
+      showType: true,
+      showAlias: true,
+    });
     const menu = await openMenu();
     await userEvent.click(within(menu).getByRole("button", { name: "Clear all" }));
     expect(update).toHaveBeenCalledWith({
       showType: false,
       showSubtype: false,
+      showAlias: false,
       extraFields: [],
     });
     expect(update).toHaveBeenCalledWith({ showLifecycle: false });

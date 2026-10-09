@@ -46,6 +46,27 @@ describe("LDV display settings", () => {
     expect(getLdvSettings().showCardLogos).toBe(true);
   });
 
+  it("hides the alias by default", async () => {
+    // A view nobody configured must look as it always did, and most
+    // landscapes carry no aliases at all.
+    const { LDV_DEFAULT_SETTINGS, getLdvSettings } = await freshStore();
+    expect(LDV_DEFAULT_SETTINGS.showAlias).toBe(false);
+    expect(getLdvSettings().showAlias).toBe(false);
+  });
+
+  it("back-fills the alias switch for a browser that predates it", async () => {
+    localStorage.setItem(KEY, JSON.stringify({ showType: false }));
+    const { getLdvSettings } = await freshStore();
+    expect(getLdvSettings().showAlias).toBe(false);
+  });
+
+  it("round-trips the alias switch through storage", async () => {
+    const { getLdvSettings, setLdvSettings } = await freshStore();
+    setLdvSettings({ showAlias: true });
+    expect(getLdvSettings().showAlias).toBe(true);
+    expect(JSON.parse(localStorage.getItem(KEY) || "{}").showAlias).toBe(true);
+  });
+
   it("fills in an option missing from previously stored settings", async () => {
     // What a browser holds after upgrading from a build that predates the
     // option. Without the merge onto the defaults it would read as undefined —
@@ -128,5 +149,32 @@ describe("LDV display settings", () => {
     expect(JSON.parse(localStorage.getItem(KEY)!).showRelationLabels).toBe(false);
     // Untouched options keep their values.
     expect(getLdvSettings().showRelationValues).toBe(true);
+  });
+});
+
+describe("toCardLabels", () => {
+  // The projection the "Show on card" picker reads and Create-diagram seeds a
+  // new DrawIO diagram's `cardLabels` with — so a row shown on the report is
+  // a row shown on the diagram made from it.
+  it("projects type, subtype, alias and the picked fields", async () => {
+    const { LDV_DEFAULT_SETTINGS, toCardLabels } = await freshStore();
+    expect(
+      toCardLabels({
+        ...LDV_DEFAULT_SETTINGS,
+        showSubtype: true,
+        showAlias: true,
+        extraFields: ["owner"],
+      }),
+    ).toEqual({ showType: true, showSubtype: true, showAlias: true, fields: ["owner"] });
+  });
+
+  it("projects the defaults with the alias off", async () => {
+    const { LDV_DEFAULT_SETTINGS, toCardLabels } = await freshStore();
+    expect(toCardLabels(LDV_DEFAULT_SETTINGS)).toEqual({
+      showType: true,
+      showSubtype: false,
+      showAlias: false,
+      fields: [],
+    });
   });
 });

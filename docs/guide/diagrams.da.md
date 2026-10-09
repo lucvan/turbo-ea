@@ -94,7 +94,7 @@ En flydende forklaring nederst til venstre viser én skala pr. aktiv regel. Felt
 
 #### Vis på kortet
 
-En anden knap i værktøjslinjen, **Vis på kortet**, afgør, **hvad hver figur siger**. Sæt flueben ved **korttypen**, **undertypen** eller en vilkårlig egenskab fra de korttyper, der aktuelt er på lærredet, og hver figur får små detaljelinjer under sit navn. Felterne står under den korttype, de hører til; et felt, som flere af de typer deler, samles under **Fælles**. Det er en separat knap fra **Farvelæg efter**, så ingen af de to lister skal scrolles forbi for at nå den anden. **Ryd alle** fjerner alle flueben på én gang.
+En anden knap i værktøjslinjen, **Vis på kortet**, afgør, **hvad hver figur siger**. Sæt flueben ved **korttypen**, **undertypen**, **aliasset** (vist som en *Alias:*-linje, kun på kort der har et) eller en vilkårlig egenskab fra de korttyper, der aktuelt er på lærredet, og hver figur får små detaljelinjer under sit navn. Felterne står under den korttype, de hører til; et felt, som flere af de typer deler, samles under **Fælles**. Det er en separat knap fra **Farvelæg efter**, så ingen af de to lister skal scrolles forbi for at nå den anden. **Ryd alle** fjerner alle flueben på én gang.
 
 Hvert valg tegnes på figuren, og figuren **vokser, så der er plads**. Der er allerede plads til to linjer i et kort, så intet flytter sig, før du sætter flueben ved et tredje; derfra bliver hvert kort en anelse højere pr. valg og skrumper tilbage, når du fjerner et. Et kort, du selv har ændret størrelse på, beholder din højde: det får kun tilføjet eller frigivet pladsen til én linje.
 

@@ -35,6 +35,7 @@ import { useNavigate } from "react-router";
 import { api } from "@/api/client";
 import { readableTypeColor, tint as washColor } from "@/lib/color";
 import {
+  aliasLine,
   buildFieldCatalog,
   EMPTY_VALUE,
   formatFieldValue,
@@ -1642,6 +1643,10 @@ function LayeredDependencyInner({
           value: subtypeLabel((n.data as LdvNodeData).typeKey, subtypeKey),
         });
       }
+      if (settings.showAlias) {
+        const line = aliasLine(g?.alias, t("common:labels.alias"));
+        if (line) lines.push(line);
+      }
       for (const fk of settings.extraFields) {
         const meta = fieldMetaByKey.get(fk);
         const value = formatVal(g?.attributes?.[fk], meta);
@@ -1689,6 +1694,7 @@ function LayeredDependencyInner({
       settings.showLifecycle,
       settings.showType,
       settings.showSubtype,
+      settings.showAlias,
       settings.extraFields,
       subtypeLabel,
       fieldMetaByKey,
