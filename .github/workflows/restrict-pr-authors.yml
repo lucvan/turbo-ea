@@ -24,6 +24,8 @@ jobs:
         run: |
           set -euo pipefail
           ALLOWED=(
+            "lucvan"
+            "cmanique-sn"
             "vincentmakes"
             "dependabot[bot]"
             "claude[bot]"
