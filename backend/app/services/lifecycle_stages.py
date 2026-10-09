@@ -142,7 +142,7 @@ def semantic_of(stages: list[dict], key: str | None) -> str | None:
     """The semantic of a stage key, ``None`` for an unknown or absent key."""
     for s in stages:
         if s["key"] == key:
-            return s["semantic"]
+            return str(s["semantic"])
     return None
 
 
@@ -301,7 +301,9 @@ SEMANTIC_SLOT: dict[str, str] = {
 SEMANTIC_KEY = "_semantic"
 
 
-def report_lifecycle(lifecycle: dict | None, explicit: str | None, config: dict | None):
+def report_lifecycle(
+    lifecycle: dict | None, explicit: str | None, config: dict | None
+) -> dict | None:
     """A card's lifecycle as reports read it: dates under the built-in phase
     names, by semantic. The earliest date wins when several stages share one.
     """

@@ -2043,6 +2043,17 @@
             ],
             "title": "Lifecycle"
           },
+          "lifecycle_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle Stage"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -2511,6 +2522,17 @@
               }
             ],
             "title": "Lifecycle"
+          },
+          "lifecycle_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle Stage"
           },
           "name": {
             "title": "Name",
@@ -3063,6 +3085,17 @@
             ],
             "title": "Lifecycle"
           },
+          "lifecycle_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle Stage"
+          },
           "logo_updated_at": {
             "anyOf": [
               {
@@ -3292,6 +3325,17 @@
               }
             ],
             "title": "Lifecycle"
+          },
+          "lifecycle_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle Stage"
           },
           "name": {
             "anyOf": [
