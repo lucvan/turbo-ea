@@ -27,6 +27,7 @@ import Collapse from "@mui/material/Collapse";
 import LinearProgress from "@mui/material/LinearProgress";
 import Divider from "@mui/material/Divider";
 import Tooltip from "@mui/material/Tooltip";
+import Alert from "@mui/material/Alert";
 import CardLogoAvatar from "@/components/CardLogoAvatar";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { useTheme } from "@mui/material/styles";
@@ -44,6 +45,8 @@ import { PercentBar } from "@/components/PercentBar";
 import { todayIsoDate } from "@/lib/dates";
 import TagPicker from "@/components/TagPicker";
 import { publicGet, type ApiError } from "./publicApi";
+import { useLatestRequest } from "@/hooks/useLatestRequest";
+import { failureMessage, wordFailure } from "@/lib/failureMessage";
 import { buildAuthorizeUrl, newNonce } from "@/lib/publicSso";
 import PortalPpmPortfolio from "./PortalPpmPortfolio";
 import { BOARD_MAX_WIDTH, BOARD_GUTTER } from "@/features/ppm/ppmPortfolioFormat";
@@ -319,6 +322,14 @@ function FieldValue({
 }
 
 export default function PortalViewer() {
+  const { slug } = useParams<{ slug: string }>();
+  // Keyed by slug: moving to another portal inside the app starts from nothing,
+  // so no request for the new slug is ever built from the old portal's
+  // configuration (its relation types, fields or filters).
+  return <PortalViewerForSlug key={slug} slug={slug} />;
+}
+
+function PortalViewerForSlug({ slug }: { slug: string | undefined }) {
   const { t } = useTranslation("common");
   const { formatDate } = useDateFormat();
   const rl = useResolveLabel();
@@ -327,7 +338,6 @@ export default function PortalViewer() {
   const fieldLabel = useFieldLabel();
   const optLabel = useOptionLabel();
   const stLabel = useSubtypeLabel();
-  const { slug } = useParams<{ slug: string }>();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
@@ -348,8 +358,11 @@ export default function PortalViewer() {
   const [sortBy, setSortBy] = useState("name");
   const [sortDir, setSortDir] = useState("asc");
   const [loading, setLoading] = useState(true);
-  const [fsLoading, setFsLoading] = useState(false);
+  // Loading until the first card query has answered, so "no results" never
+  // flashes before it.
+  const [fsLoading, setFsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [cardsError, setCardsError] = useState("");
   const [selectedFs, setSelectedFs] = useState<PortalCard | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -374,6 +387,9 @@ export default function PortalViewer() {
           const p = await publicGet<PublicPortal>(`/web-portals/public/${slug}`);
           if (!cancelled) setPortal(p);
         } catch (e) {
+          // The visitor has moved on to another portal: never start this
+          // one's sign-in (a navigation away from the page they are now on).
+          if (cancelled) return;
           const status = (e as ApiError).status;
           if (g.access_mode === "sso" && status === 401) {
             const canSso = Boolean(g.sso?.authorization_endpoint && g.sso?.client_id);
@@ -440,50 +456,70 @@ export default function PortalViewer() {
       seen.add(rt.other_type_key);
       publicGet<{ id: string; name: string }[]>(
         `/web-portals/public/${slug}/relation-options?type_key=${rt.other_type_key}`
-      ).then((opts) =>
-        setRelationOptions((prev) => ({ ...prev, [rt.other_type_key]: opts }))
-      );
+      )
+        .then((opts) =>
+          setRelationOptions((prev) => ({ ...prev, [rt.other_type_key]: opts }))
+        )
+        // Best-effort: a filter whose options failed to load is simply not
+        // offered (it has none), and the cards still load without it.
+        .catch(() => {});
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, visibleRelKeysStr]);
 
-  const loadCards = useCallback(async () => {
-    if (!slug) return;
-    setFsLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (search) params.set("search", search);
-      if (subtype) params.set("subtype", subtype);
-      const activeAttrFilters = Object.fromEntries(
-        Object.entries(attrFilters).filter(([, v]) => v !== "")
-      );
-      if (Object.keys(activeAttrFilters).length > 0) {
-        params.set("attr_filters", JSON.stringify(activeAttrFilters));
-      }
-      const activeRelFilters = Object.fromEntries(
-        Object.entries(relationFilters).filter(([, v]) => v !== "")
-      );
-      if (Object.keys(activeRelFilters).length > 0) {
-        params.set("relation_filters", JSON.stringify(activeRelFilters));
-      }
-      if (tagFilter.length > 0) {
-        params.set("tag_ids", tagFilter.join(","));
-      }
-      params.set("page", String(page));
-      params.set("page_size", String(pageSize));
-      params.set("sort_by", sortBy);
-      params.set("sort_dir", sortDir);
-      const data = await publicGet<PortalCardListResponse>(
-        `/web-portals/public/${slug}/cards?${params.toString()}`
-      );
-      setCards(data.items);
-      setTotal(data.total);
-    } catch {
-      // ignore
-    } finally {
-      setFsLoading(false);
-    }
-  }, [slug, search, subtype, attrFilters, relationFilters, tagFilter, page, pageSize, sortBy, sortDir]);
+  // Keyed on every filter, so it runs as the newest request: a reply for the
+  // previous query can neither overwrite this one's cards nor put its error
+  // over them, and only the winner clears the spinner.
+  const cardsRequest = useLatestRequest();
+  const loadCards = useCallback(
+    () =>
+      cardsRequest.run(async ({ signal, isCurrent }) => {
+        // Stryker disable next-line ConditionalExpression: the route always carries a slug; this narrows the type
+        if (!slug) return;
+        setFsLoading(true);
+        setCardsError("");
+        try {
+          const params = new URLSearchParams();
+          if (search) params.set("search", search);
+          if (subtype) params.set("subtype", subtype);
+          const activeAttrFilters = Object.fromEntries(
+            Object.entries(attrFilters).filter(([, v]) => v !== "")
+          );
+          if (Object.keys(activeAttrFilters).length > 0) {
+            params.set("attr_filters", JSON.stringify(activeAttrFilters));
+          }
+          const activeRelFilters = Object.fromEntries(
+            Object.entries(relationFilters).filter(([, v]) => v !== "")
+          );
+          if (Object.keys(activeRelFilters).length > 0) {
+            params.set("relation_filters", JSON.stringify(activeRelFilters));
+          }
+          if (tagFilter.length > 0) {
+            params.set("tag_ids", tagFilter.join(","));
+          }
+          params.set("page", String(page));
+          params.set("page_size", String(pageSize));
+          params.set("sort_by", sortBy);
+          params.set("sort_dir", sortDir);
+          const data = await publicGet<PortalCardListResponse>(
+            `/web-portals/public/${slug}/cards?${params.toString()}`,
+            // Stryker disable next-line ObjectLiteral: the signal only cancels the request on the wire; the stale-reply guard, which is what the tests pin, is isCurrent()
+            { signal },
+          );
+          if (!isCurrent()) return;
+          setCards(data.items);
+          setTotal(data.total);
+        } catch (e) {
+          // A superseded query is aborted by the hook; that is not a failure.
+          // Stryker disable next-line OptionalChaining,StringLiteral: defensive; an abort only reaches here from a superseded query, which isCurrent() already stops
+          if (!isCurrent() || (e as { name?: unknown } | null)?.name === "AbortError") return;
+          setCardsError(failureMessage(e, "errors.generic"));
+        } finally {
+          if (isCurrent()) setFsLoading(false);
+        }
+      }),
+    [cardsRequest, slug, search, subtype, attrFilters, relationFilters, tagFilter, page, pageSize, sortBy, sortDir],
+  );
 
   useEffect(() => {
     // A board portal renders its own data; issuing the card query would be a
@@ -712,7 +748,7 @@ export default function PortalViewer() {
               )}
               {!isBoard && (
                 <Typography variant="body2" sx={{ mt: 1.5, opacity: 0.5, fontSize: "0.8rem" }}>
-                  {t("portal.itemCount", { count: total, label: portal.type_info ? typeLabel(portal.type_info) : "item" })}
+                  {t("portal.itemCount", { count: total, label: portal.type_info ? typeLabel(portal.type_info) : t("portal.items") })}
                 </Typography>
               )}
             </Box>
@@ -769,7 +805,7 @@ export default function PortalViewer() {
           >
             <TextField
               size="small"
-              placeholder={t("portal.searchPlaceholder", { label: portal.type_info ? typeLabel(portal.type_info) : "items" })}
+              placeholder={t("portal.searchPlaceholder", { label: portal.type_info ? typeLabel(portal.type_info) : t("portal.items") })}
               defaultValue={search}
               onChange={(e) => handleSearchChange(e.target.value)}
               sx={{ flex: 1, minWidth: 200 }}
@@ -958,7 +994,13 @@ export default function PortalViewer() {
 
         {/* Cards Grid */}
         <Box sx={{ maxWidth: 1200, mx: "auto", px: { xs: 2, md: 4 }, py: 3 }}>
-          {cards.length === 0 && !fsLoading && (
+          {cardsError && (
+            // Stryker disable next-line ObjectLiteral: spacing is presentation
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {wordFailure(cardsError, t)}
+            </Alert>
+          )}
+          {cards.length === 0 && !fsLoading && !cardsError && (
             <Box sx={{ textAlign: "center", py: 8 }}>
               <Icon name="search_off" size={48} color="#ccc" />
               <Typography variant="h6" color="text.secondary" sx={{ mt: 1 }}>
@@ -1136,7 +1178,9 @@ export default function PortalViewer() {
                     {/* Approval Status */}
                     {show("approval_status", "card", false) && card.approval_status && card.approval_status !== "DRAFT" && (
                       <Chip
-                        label={card.approval_status}
+                        label={t(`status.${card.approval_status.toLowerCase()}`, {
+                          defaultValue: card.approval_status,
+                        })}
                         size="small"
                         sx={{
                           mt: 1,
@@ -1452,7 +1496,9 @@ export default function PortalViewer() {
                     )}
                     {show("approval_status", "detail") && selectedFs.approval_status && selectedFs.approval_status !== "DRAFT" && (
                     <Chip
-                      label={selectedFs.approval_status}
+                      label={t(`status.${selectedFs.approval_status.toLowerCase()}`, {
+                        defaultValue: selectedFs.approval_status,
+                      })}
                       size="small"
                       sx={{
                         height: 28,

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
@@ -10,13 +11,14 @@ import { useTranslation } from "react-i18next";
 import MaterialSymbol from "@/components/MaterialSymbol";
 import { api } from "@/api/client";
 import { useDateFormat } from "@/hooks/useDateFormat";
+import { RAG_COLORS, STATUS_COLORS } from "@/theme/tokens";
 import StatusReportDialog from "./StatusReportDialog";
 import type { PpmStatusReport } from "@/types";
 
-const RAG_COLORS: Record<string, string> = {
-  onTrack: "#2e7d32",
-  atRisk: "#ed6c02",
-  offTrack: "#d32f2f",
+const HEALTH_DOT_COLORS: Record<string, string> = {
+  onTrack: RAG_COLORS.green,
+  atRisk: RAG_COLORS.amber,
+  offTrack: RAG_COLORS.red,
 };
 
 interface Props {
@@ -32,9 +34,17 @@ export default function PpmReportsTab({ initiativeId, reports, onRefresh }: Prop
     open: boolean;
     report?: PpmStatusReport;
   }>({ open: false });
+  // A failed delete, shown above the reports.
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleDelete = async (reportId: string) => {
-    await api.delete(`/ppm/reports/${reportId}`);
+    setDeleteError(null);
+    try {
+      await api.delete(`/ppm/reports/${reportId}`);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : t("common:errors.generic"));
+      return;
+    }
     onRefresh();
   };
 
@@ -50,6 +60,13 @@ export default function PpmReportsTab({ initiativeId, reports, onRefresh }: Prop
           {t("addReport")}
         </Button>
       </Box>
+
+      {deleteError && (
+        // Stryker disable next-line ObjectLiteral: spacing is presentation
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setDeleteError(null)}>
+          {deleteError}
+        </Alert>
+      )}
 
       {reports.length === 0 ? (
         <Paper sx={{ p: { xs: 3, sm: 4 }, textAlign: "center" }}>
@@ -106,7 +123,8 @@ export default function PpmReportsTab({ initiativeId, reports, onRefresh }: Prop
                             height: 12,
                             borderRadius: "50%",
                             flexShrink: 0,
-                            bgcolor: RAG_COLORS[value || ""] || "#bdbdbd",
+                            // Stryker disable next-line StringLiteral: no health is keyed by the empty string, nor by any other filler
+          bgcolor: HEALTH_DOT_COLORS[value || ""] || STATUS_COLORS.neutral,
                           }}
                           title={statusLabel}
                         />
@@ -126,12 +144,14 @@ export default function PpmReportsTab({ initiativeId, reports, onRefresh }: Prop
               <Box sx={{ flexShrink: 0 }}>
                 <IconButton
                   size="small"
+                  aria-label={t("editReport")}
                   onClick={() => setReportDialog({ open: true, report })}
                 >
                   <MaterialSymbol icon="edit" size={18} />
                 </IconButton>
                 <IconButton
                   size="small"
+                  aria-label={t("deleteReport")}
                   onClick={() => handleDelete(report.id)}
                 >
                   <MaterialSymbol icon="delete" size={18} />

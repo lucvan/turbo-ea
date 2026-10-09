@@ -383,10 +383,11 @@ describe("ProcessFlowTab published elements table", () => {
     );
   });
 
-  it("treats a failed elements load as an empty table", async () => {
+  it("shows a failed elements load as an error in place of the table", async () => {
     mockApi.fail("get", `${BASE}/elements`);
     renderTab();
     expect(await screen.findByText(/Approved/)).toBeInTheDocument();
+    expect(screen.getByText(`GET ${BASE}/elements failed`)).toBeInTheDocument();
     expect(screen.queryByText("Process Steps & Elements")).toBeNull();
   });
 });
@@ -576,19 +577,21 @@ describe("ProcessFlowTab without a published flow", () => {
     expect(screen.queryByRole("tab", { name: "Drafts" })).toBeNull();
   });
 
-  it("treats a failed initial load as nothing published", async () => {
+  it("shows a failed initial load as an error, not as nothing published", async () => {
     mockApi.fail("get", `${BASE}/flow/published`);
     renderTab();
-    expect(await screen.findByText("No published process flow yet")).toBeInTheDocument();
+    expect(await screen.findByText(`GET ${BASE}/flow/published failed`)).toBeInTheDocument();
+    expect(screen.queryByText("No published process flow yet")).toBeNull();
   });
 
-  it("shows the empty state when the drafts cannot be loaded", async () => {
+  it("shows the error, not the empty state, when the drafts cannot be loaded", async () => {
     script({ published: null });
     mockApi.fail("get", `${BASE}/flow/drafts`);
     const user = renderTab();
     expect(await screen.findByText(/Create a draft, then submit it/)).toBeInTheDocument();
     await goToTab(user, "Drafts");
-    expect(await screen.findByText("No draft process flows.")).toBeInTheDocument();
+    expect(await screen.findByText(`GET ${BASE}/flow/drafts failed`)).toBeInTheDocument();
+    expect(screen.queryByText("No draft process flows.")).toBeNull();
   });
 });
 
@@ -706,7 +709,7 @@ describe("ProcessFlowTab drafts", () => {
     expect(await screen.findByText("Failed to update draft element link")).toBeInTheDocument();
   });
 
-  it("says so when a draft has no named elements or they cannot be loaded", async () => {
+  it("says so when a draft has no named elements, and says when they cannot be loaded", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     mockApi.fail("get", `${BASE}/flow/versions/d2`);
     mockApi.fail("get", `${BASE}/flow/versions/d2/draft-elements`);
@@ -716,12 +719,17 @@ describe("ProcessFlowTab drafts", () => {
     await user.click(screen.getByText("Revision 5"));
     // No detail and no thumbnail: the preview placeholder.
     expect(await screen.findByText("Loading preview...")).toBeInTheDocument();
-    expect(await screen.findByText("No named elements found in this draft.")).toBeInTheDocument();
+    expect(
+      await screen.findByText(`GET ${BASE}/flow/versions/d2/draft-elements failed`),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No named elements found in this draft.")).toBeNull();
     expect(error).toHaveBeenCalledWith("Failed to load draft detail:", expect.anything());
 
-    // Collapse keeps a closed draft's content mounted, so both now say it.
+    // Collapse keeps a closed draft's content mounted: the failed one keeps its
+    // error, the empty one says it has no named elements.
     await user.click(screen.getByText("Revision 4"));
-    await waitFor(() => expect(screen.getAllByText("No named elements found in this draft.")).toHaveLength(2));
+    expect(await screen.findByText("No named elements found in this draft.")).toBeInTheDocument();
+    expect(screen.getByText(`GET ${BASE}/flow/versions/d2/draft-elements failed`)).toBeInTheDocument();
     error.mockRestore();
   });
 
@@ -778,10 +786,11 @@ describe("ProcessFlowTab archived versions", () => {
     );
   });
 
-  it("shows the empty state when the archive cannot be loaded", async () => {
+  it("shows the error, not the empty state, when the archive cannot be loaded", async () => {
     mockApi.fail("get", `${BASE}/flow/archived`);
     renderTab({ initialSubTab: 2 });
-    expect(await screen.findByText("No archived process flows.")).toBeInTheDocument();
+    expect(await screen.findByText(`GET ${BASE}/flow/archived failed`)).toBeInTheDocument();
+    expect(screen.queryByText("No archived process flows.")).toBeNull();
   });
 
   it("offers no re-draft to a viewer who cannot edit", async () => {

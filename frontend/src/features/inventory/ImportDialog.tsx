@@ -449,10 +449,13 @@ export default function ImportDialog({
                                 </TableCell>
                               ) : null}
                               <TableCell sx={{ whiteSpace: "nowrap", color: "text.secondary" }}>
-                                {field
-                                  .replace(/^attr_/, "")
-                                  .replace(/^lifecycle_/, "lifecycle: ")
-                                  .replace(/^stakeholder_/, "stakeholder: ")}
+                                {/* One prefix per key: an attribute named
+                                    `lifecycle_…` is not a lifecycle column. */}
+                                {field.replace(
+                                  // Stryker disable next-line Regex: every key the change table carries starts with its prefix (`attr_`, `lifecycle_`, `stakeholder_`) or has none, so an unanchored match is the same match
+                                  /^(?:attr_|(lifecycle|stakeholder)_)/,
+                                  (_m, kind?: string) => (kind ? `${kind}: ` : ""),
+                                )}
                               </TableCell>
                               <TableCell sx={{ color: "text.secondary", wordBreak: "break-word", maxWidth: 200 }}>
                                 <span style={{ textDecoration: "line-through", opacity: 0.6 }}>

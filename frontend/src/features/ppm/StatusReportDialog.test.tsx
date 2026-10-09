@@ -13,6 +13,7 @@ vi.mock("@/api/client", () => import("@/test/apiMock").then((m) => m.apiClientMo
 
 import { mockApi } from "@/test/apiMock";
 import { todayIsoDate } from "@/lib/dates";
+import { RAG_COLORS } from "@/theme/tokens";
 import i18n from "@/i18n";
 import StatusReportDialog from "./StatusReportDialog";
 
@@ -75,6 +76,7 @@ describe("StatusReportDialog — new report", () => {
     expect(pressed("Schedule")).toEqual(["On Track"]);
     expect(pressed("Cost")).toEqual(["On Track"]);
     expect(pressed("Scope")).toEqual(["On Track"]);
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("posts the chosen health, date and texts, sending empty texts as null", async () => {
@@ -124,15 +126,27 @@ describe("StatusReportDialog — new report", () => {
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
-  it("stays open and re-enables saving when the request fails", async () => {
+  it("stays open, says why and re-enables saving when the request fails", async () => {
     mockApi.fail("post", createPath, 500);
     const { user, onSaved } = renderDialog();
-    const save = within(screen.getByRole("dialog")).getByRole("button", { name: "Add Report" });
+    const dialog = screen.getByRole("dialog");
+    const save = within(dialog).getByRole("button", { name: "Add Report" });
     await user.click(save);
-    await waitFor(() => expect(mockApi.callsOf("post", createPath)).toHaveLength(1));
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert).toHaveTextContent(`POST ${createPath} failed`);
     await waitFor(() => expect(save).toBeEnabled());
+    expect(mockApi.callsOf("post", createPath)).toHaveLength(1);
     expect(onSaved).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBe(dialog);
+  });
+
+  it("falls back to a generic message when a save fails without one", async () => {
+    mockApi.on("post", createPath, () => Promise.reject("network down"));
+    const { user, onSaved } = renderDialog();
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Add Report" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Something went wrong");
+    expect(onSaved).not.toHaveBeenCalled();
   });
 
   it("closes through Cancel without saving", async () => {
@@ -140,6 +154,49 @@ describe("StatusReportDialog — new report", () => {
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(mockApi.calls).toHaveLength(0);
+  });
+});
+
+describe("StatusReportDialog — RAG colours", () => {
+  it("fills each selected health in the theme's RAG colour", () => {
+    renderDialog(REPORT);
+    const button = (caption: string, name: string) =>
+      within(group(caption)).getByRole("button", { name });
+    expect(button("Scope", "On Track")).toHaveStyle({ backgroundColor: RAG_COLORS.green });
+    expect(button("Schedule", "At Risk")).toHaveStyle({ backgroundColor: RAG_COLORS.amber });
+    expect(button("Cost", "Off Track")).toHaveStyle({ backgroundColor: RAG_COLORS.red });
+    // In white text (palette.common.white).
+  });
+});
+
+describe("StatusReportDialog — RAG colours on hover", () => {
+  /** The background a selected toggle takes on hover: the last `.Mui-selected:hover` rule for its class. */
+  function selectedHoverBackground(button: HTMLElement): string {
+    const classes = Array.from(button.classList).filter((c) => c.startsWith("css-"));
+    const rules = Array.from(document.styleSheets)
+      .flatMap((sheet) => Array.from(sheet.cssRules))
+      .filter((r): r is CSSStyleRule => "selectorText" in r)
+      .filter((r) =>
+        classes.some((c) => r.selectorText.includes(`.${c}.Mui-selected:hover`)) &&
+        r.style.getPropertyValue("background-color") !== "",
+      );
+    return cssColor(rules.at(-1)?.style.getPropertyValue("background-color") ?? "");
+  }
+
+  /** A colour in one spelling (a stylesheet keeps hex, an inline style turns it into rgb). */
+  function cssColor(value: string): string {
+    const probe = document.createElement("div");
+    probe.style.backgroundColor = value;
+    return probe.style.backgroundColor;
+  }
+
+  it("keeps each selected health in its RAG colour while it is hovered", () => {
+    renderDialog(REPORT);
+    const button = (caption: string, name: string) =>
+      within(group(caption)).getByRole("button", { name });
+    expect(selectedHoverBackground(button("Scope", "On Track"))).toBe(cssColor(RAG_COLORS.green));
+    expect(selectedHoverBackground(button("Schedule", "At Risk"))).toBe(cssColor(RAG_COLORS.amber));
+    expect(selectedHoverBackground(button("Cost", "Off Track"))).toBe(cssColor(RAG_COLORS.red));
   });
 });
 
@@ -170,6 +227,22 @@ describe("StatusReportDialog — editing", () => {
       next_steps: null,
     });
     expect(mockApi.callsOf("post")).toHaveLength(0);
+  });
+
+  it("says why when the patch fails, and saves on the next try", async () => {
+    mockApi.fail("patch", "/ppm/reports/rep1", 422);
+    const { user, onSaved } = renderDialog(REPORT);
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "PATCH /ppm/reports/rep1 failed",
+    );
+    expect(onSaved).not.toHaveBeenCalled();
+
+    mockApi.on("patch", "/ppm/reports/rep1", {});
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(mockApi.callsOf("patch", "/ppm/reports/rep1")).toHaveLength(2);
   });
 });
 

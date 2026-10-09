@@ -335,6 +335,7 @@
   "portal.searchPlaceholder": "بحث {{label}}...",
   "portal.itemCount_one": "{{count}} {{label}}",
   "portal.itemCount_other": "{{count}} {{label}}",
+  "portal.items": "العناصر",
   "portal.sortNameAsc": "الاسم أ-ي",
   "portal.sortNameDesc": "الاسم ي-أ",
   "portal.sortRecentlyUpdated": "المحدّثة مؤخرًا",
