@@ -360,6 +360,7 @@ async def create_card_type(
         stakeholder_roles=kwargs.get("stakeholder_roles", []),
         has_hierarchy=kwargs.get("has_hierarchy", False),
         hierarchy_labels=kwargs.get("hierarchy_labels", []),
+        lifecycle_config=kwargs.get("lifecycle_config", {}),
         allow_card_logo=kwargs.get("allow_card_logo", False),
         # Per-role overrides of the type-scoped inventory permissions.
         role_permissions=kwargs.get("role_permissions", {}),
@@ -385,6 +386,7 @@ async def create_card(db, *, card_type="Application", name="Test Card", user_id=
         data_quality=kwargs.get("data_quality", 0.0),
         attributes=kwargs.get("attributes", {}),
         lifecycle=kwargs.get("lifecycle", {}),
+        lifecycle_stage=kwargs.get("lifecycle_stage"),
         description=kwargs.get("description"),
         alias=kwargs.get("alias"),
         parent_id=kwargs.get("parent_id"),

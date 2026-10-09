@@ -707,5 +707,12 @@
   "todos.recurrence.years_one": "Chaque année",
   "todos.recurrence.years_other": "Tous les {{count}} ans",
   "utils.cardId.tooltip": "Cliquer pour copier",
-  "utils.cardId.copied": "Copié !"
+  "utils.cardId.copied": "Copié !",
+  "lifecycle.currentStage": "Étape actuelle",
+  "lifecycle.currentStageHelp": "Indiquez l'étape telle qu'elle est aujourd'hui. Aucune date n'est nécessaire.",
+  "lifecycle.notStated": "Non indiquée (utiliser les dates)",
+  "lifecycle.unknown": "Inconnue",
+  "lifecycle.stated": "indiquée",
+  "lifecycle.fromDates": "d'après les dates",
+  "lifecycle.datesDisagree": "D'après les dates, cette fiche est à l'étape {{stage}}"
 }

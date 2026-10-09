@@ -4,6 +4,9 @@ import { useTheme } from "@mui/material/styles";
 import { useTranslation } from "react-i18next";
 import MaterialSymbol from "@/components/MaterialSymbol";
 import { todayIsoDate } from "@/lib/dates";
+import { datedStage, findStage } from "@/lib/lifecycleStages";
+import { useOptionLabel } from "@/hooks/useResolveLabel";
+import type { LifecycleStageDef } from "@/types";
 
 export const PHASE_COLORS: Record<
   string,
@@ -50,13 +53,46 @@ export function getCurrentPhase(
 
 interface Props {
   lifecycle?: Record<string, string>;
+  /** The card's explicit current stage. Wins over the dates when set. */
+  stage?: string | null;
+  /** The card type's own stage vocabulary; omit for the built-in phases. */
+  stages?: LifecycleStageDef[];
   size?: "small" | "medium";
 }
 
-export default function LifecycleBadge({ lifecycle, size = "small" }: Props) {
+export default function LifecycleBadge({ lifecycle, stage, stages, size = "small" }: Props) {
   const { t } = useTranslation("common");
   const theme = useTheme();
-  const phase = getCurrentPhase(lifecycle);
+  const optLabel = useOptionLabel();
+  if (stages && stages.length > 0) {
+    const key = stage || datedStage(lifecycle, stages);
+    if (!key) return null;
+    const def = findStage(stages, key);
+    // A stage the vocabulary no longer defines still renders, by its key, in
+    // the neutral colour — the card holds it until someone changes it.
+    const color = def?.color ?? theme.palette.text.secondary;
+    return (
+      <Chip
+        size={size}
+        label={def ? optLabel(def) : key}
+        variant="outlined"
+        sx={{ borderColor: color }}
+        icon={
+          <Box
+            sx={{
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              bgcolor: color,
+              flexShrink: 0,
+              ml: "8px !important",
+            }}
+          />
+        }
+      />
+    );
+  }
+  const phase = stage || getCurrentPhase(lifecycle);
   if (!phase) return null;
   const chipColor = PHASE_COLORS[phase] || "default";
   const dotColor =

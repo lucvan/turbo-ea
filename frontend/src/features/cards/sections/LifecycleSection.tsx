@@ -12,7 +12,11 @@ import { useTranslation } from "react-i18next";
 import { DateField } from "@/components/DateField";
 import MaterialSymbol from "@/components/MaterialSymbol";
 import { PHASE_ICONS } from "@/components/LifecycleBadge";
-import { PHASES, getPhaseLabels, lifecycleOrderIssues } from "@/lib/lifecyclePhases";
+import MenuItem from "@mui/material/MenuItem";
+import TextField from "@mui/material/TextField";
+import Chip from "@mui/material/Chip";
+import { stageOrderIssues, datedStage } from "@/lib/lifecycleStages";
+import { useLifecycleStages } from "@/hooks/useLifecycleStages";
 import { useDateFormat } from "@/hooks/useDateFormat";
 import { todayIsoDate } from "@/lib/dates";
 import { useSyncedExpanded } from "@/hooks/useSyncedExpanded";
@@ -59,24 +63,44 @@ function LifecycleSection({
   const { t } = useTranslation(["cards", "common"]);
   const theme = useTheme();
   const { formatDate } = useDateFormat();
-  const phaseLabels = getPhaseLabels(t);
+  // The card type's stages: its own vocabulary, or the built-in phases. Every
+  // per-stage lookup below goes through these four, so the section renders any
+  // vocabulary the same way it always rendered the five phases.
+  const { stages, customStages, stageLabel } = useLifecycleStages();
+  const stageDefs = stages(card.type);
+  const isCustom = !!customStages(card.type);
+  const PHASES = stageDefs.map((s) => s.key);
+  const phaseLabels: Record<string, string> = Object.fromEntries(
+    PHASES.map((key) => [key, stageLabel(card.type, key)]),
+  );
+  // Built-in phases keep their shipped palette; a custom stage uses its own colour.
+  const paletteOf = (key: string) =>
+    (isCustom ? undefined : PHASE_PALETTE[key]) ??
+    stageDefs.find((s) => s.key === key)?.color ??
+    "#9e9e9e";
   const [expanded, setExpanded] = useSyncedExpanded(initialExpanded);
   const [editing, setEditing] = useState(false);
   const [lifecycle, setLifecycle] = useState<Record<string, string>>(
     card.lifecycle || {}
   );
+  // The explicit current stage — "" is "not stated", leaving it to the dates.
+  const [stage, setStage] = useState<string>(card.lifecycle_stage || "");
 
   // Re-sync the draft from the card prop only while NOT editing, so saving
   // another section (which replaces the whole card object in the parent) can't
   // clobber this section's in-progress draft (issue #843).
   useEffect(() => {
-    if (!editing) setLifecycle(card.lifecycle || {});
-  }, [card.lifecycle, editing]);
+    if (!editing) {
+      setLifecycle(card.lifecycle || {});
+      setStage(card.lifecycle_stage || "");
+    }
+  }, [card.lifecycle, card.lifecycle_stage, editing]);
 
   // Report unsaved-changes state up so the page can warn on navigation (#843).
   const dirty =
     editing &&
-    JSON.stringify(lifecycle) !== JSON.stringify(card.lifecycle || {});
+    (JSON.stringify(lifecycle) !== JSON.stringify(card.lifecycle || {}) ||
+      stage !== (card.lifecycle_stage || ""));
   useEffect(() => {
     onDirtyChange?.(dirty);
     return () => onDirtyChange?.(false);
@@ -84,8 +108,8 @@ function LifecycleSection({
 
   // Advisory only: a phase dated after one that should follow it is flagged,
   // never refused — real lifecycles do slip, and the save stays the user's call.
-  const orderIssues = lifecycleOrderIssues(lifecycle);
-  const orderWarning = (phase: (typeof PHASES)[number]) => {
+  const orderIssues = stageOrderIssues(lifecycle, stageDefs);
+  const orderWarning = (phase: string) => {
     const later = orderIssues[phase];
     if (!later) return null;
     return t("lifecycle.orderWarning", {
@@ -95,7 +119,13 @@ function LifecycleSection({
   };
 
   const save = async () => {
-    await onSave({ lifecycle });
+    // The stage rides along only when it moved, so a dates-only edit sends
+    // exactly what it always sent.
+    await onSave(
+      stage !== (card.lifecycle_stage || "")
+        ? { lifecycle, lifecycle_stage: stage || null }
+        : { lifecycle },
+    );
     setEditing(false);
   };
 
@@ -153,12 +183,11 @@ function LifecycleSection({
           {(() => {
             const now = todayIsoDate();
             // Determine current phase index (latest phase whose date has passed)
-            let currentIdx = -1;
-            for (let i = PHASES.length - 1; i >= 0; i--) {
+            let currentIdx = stage ? PHASES.indexOf(stage) : -1;
+            for (let i = PHASES.length - 1; currentIdx < 0 && !stage && i >= 0; i--) {
               const d = lifecycle[PHASES[i]];
               if (d && d <= now) {
                 currentIdx = i;
-                break;
               }
             }
             if (currentIdx < 0) return null;
@@ -171,12 +200,12 @@ function LifecycleSection({
             let gradient: string;
             if (currentIdx === 0) {
               // Single phase reached — fill is zero-width, just render the colour.
-              gradient = PHASE_PALETTE[PHASES[0]];
+              gradient = paletteOf(PHASES[0]);
             } else {
               const stops = PHASES.slice(0, currentIdx + 1)
                 .map((phase, i) => {
                   const pct = (i / currentIdx) * 100;
-                  return `${PHASE_PALETTE[phase]} ${pct.toFixed(2)}%`;
+                  return `${paletteOf(phase)} ${pct.toFixed(2)}%`;
                 })
                 .join(", ");
               gradient = `linear-gradient(90deg, ${stops})`;
@@ -208,14 +237,20 @@ function LifecycleSection({
             {PHASES.map((phase, i) => {
               const date = lifecycle[phase];
               const now = todayIsoDate();
-              const isPast =
-                i < PHASES.length - 1 &&
-                PHASES.slice(i + 1).some(
-                  (p) => lifecycle[p] && lifecycle[p]! <= now,
-                );
-              const isCurrent = !!date && date <= now && !isPast;
+              // With an explicit stage the timeline follows it; the dates stay
+              // on show underneath as history and plans.
+              const stageIdx = stage ? PHASES.indexOf(stage) : -1;
+              const isPast = stage
+                ? i < stageIdx
+                : i < PHASES.length - 1 &&
+                  PHASES.slice(i + 1).some(
+                    (p) => lifecycle[p] && lifecycle[p]! <= now,
+                  );
+              const isCurrent = stage
+                ? i === stageIdx
+                : !!date && date <= now && !isPast;
               const isReached = isCurrent || isPast;
-              const phaseColor = PHASE_PALETTE[phase];
+              const phaseColor = paletteOf(phase);
               const dotBg = isReached ? phaseColor : theme.palette.background.paper;
               const dotBorder = isReached
                 ? phaseColor
@@ -297,8 +332,69 @@ function LifecycleSection({
             })}
           </Box>
         </Box>
+        {!editing && (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1, flexWrap: "wrap" }}>
+            <Typography variant="body2" color="text.secondary">
+              {t("lifecycle.currentStage")}
+            </Typography>
+            {(() => {
+              const derived = datedStage(lifecycle, stageDefs);
+              const key = stage || derived;
+              if (!key) {
+                return (
+                  <Typography variant="body2" color="text.secondary" fontStyle="italic">
+                    {t("lifecycle.unknown")}
+                  </Typography>
+                );
+              }
+              return (
+                <>
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={phaseLabels[key] ?? key}
+                    sx={{ borderColor: paletteOf(key) }}
+                  />
+                  <Typography variant="caption" color="text.secondary">
+                    {stage ? t("lifecycle.stated") : t("lifecycle.fromDates")}
+                  </Typography>
+                  {stage && derived && derived !== stage && (
+                    <Tooltip
+                      title={t("lifecycle.datesDisagree", { stage: phaseLabels[derived] ?? derived })}
+                    >
+                      <Box component="span" sx={{ display: "inline-flex" }}>
+                        <MaterialSymbol icon="warning" size={14} color={theme.palette.warning.main} />
+                      </Box>
+                    </Tooltip>
+                  )}
+                </>
+              );
+            })()}
+          </Box>
+        )}
         {editing && (
           <Box>
+            <TextField
+              select
+              size="small"
+              label={t("lifecycle.currentStage")}
+              value={stage}
+              onChange={(e) => setStage(e.target.value)}
+              helperText={t("lifecycle.currentStageHelp")}
+              sx={{ minWidth: 260, mb: 2 }}
+            >
+              <MenuItem value="">
+                <em>{t("lifecycle.notStated")}</em>
+              </MenuItem>
+              {/* A stored stage the vocabulary no longer defines stays selectable,
+                  so opening the editor never silently changes the card. */}
+              {stage && !PHASES.includes(stage) && <MenuItem value={stage}>{stage}</MenuItem>}
+              {PHASES.map((key) => (
+                <MenuItem key={key} value={key}>
+                  {phaseLabels[key]}
+                </MenuItem>
+              ))}
+            </TextField>
             <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap", mb: 2 }}>
               {PHASES.map((phase) => {
                 const annotation = phaseAnnotation?.(phase);
@@ -340,6 +436,7 @@ function LifecycleSection({
                 size="small"
                 onClick={() => {
                   setLifecycle(card.lifecycle || {});
+                  setStage(card.lifecycle_stage || "");
                   setEditing(false);
                 }}
               >

@@ -90,6 +90,17 @@ The lifecycle model tracks a component through five phases:
 
 Each phase has a **date picker** so you can record when the component entered or will enter that phase. A visual timeline bar shows the component's position in its lifecycle.
 
+An administrator can replace these five phases with a card type's own **lifecycle stages** — for example Evaluating, Emerging, Core, Heritage, Sunset and Discontinued for applications. The section then shows that type's stages, in its order and colours. See [Lifecycle stages](../admin/metamodel.md#lifecycle-stages).
+
+**Current stage.** While editing you can also pick the **Current stage** directly. It needs no date: use it when you know where a component is today but not when it got there. The stated stage and the dates are separate facts:
+
+- The stated stage is what the lifecycle badge, the inventory filter and the dashboard show.
+- The dates remain the dated history and the planned transitions, and are what the timeline reports draw. A date in the future is a plan, not the current stage.
+- With no stated stage, the current stage is derived from the dates. With neither, the stage is **Unknown** — a card is never assumed to be active.
+- If the dates point to a different stage than the stated one, a warning icon says so. Both are kept.
+
+The lifecycle stage is separate from archiving a card, from its approval status, and from assessments such as the TIME model: setting a stage, even a retired one, changes none of them.
+
 If a phase is dated after a phase that should follow it — for example **Phase Out** after **End of Life** — a warning icon appears next to that date, and the same warning shows under the field while editing. It is only a hint: the dates can still be saved as entered.
 
 ### Custom Attribute Sections

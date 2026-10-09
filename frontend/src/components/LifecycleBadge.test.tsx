@@ -152,3 +152,63 @@ describe("getCurrentPhase asOfMs (time travel)", () => {
     expect(getCurrentPhase(lc)).toBe(getCurrentPhase(lc, Date.now()));
   });
 });
+
+// ---------------------------------------------------------------------------
+// Explicit stage and per-type vocabularies
+// ---------------------------------------------------------------------------
+
+describe("LifecycleBadge with stages", () => {
+  const STAGES = [
+    { key: "core", label: "Core", color: "#2e7d32", semantic: "operational" as const },
+    {
+      key: "sunset",
+      label: "Sunset",
+      color: "#ed6c02",
+      semantic: "retiring" as const,
+      translations: { en: "Sunsetting" },
+    },
+  ];
+
+  it("shows an explicit stage that has no date", () => {
+    render(<LifecycleBadge lifecycle={{}} stage="core" stages={STAGES} />);
+    expect(screen.getByText("Core")).toBeInTheDocument();
+  });
+
+  it("lets the explicit stage win over the dates", () => {
+    render(<LifecycleBadge lifecycle={{ sunset: "2000-01-01" }} stage="core" stages={STAGES} />);
+    expect(screen.getByText("Core")).toBeInTheDocument();
+    expect(screen.queryByText("Sunsetting")).not.toBeInTheDocument();
+  });
+
+  it("derives the stage from the dates, with the translated label", () => {
+    render(<LifecycleBadge lifecycle={{ core: "2000-01-01", sunset: "2001-01-01" }} stages={STAGES} />);
+    expect(screen.getByText("Sunsetting")).toBeInTheDocument();
+  });
+
+  it("renders nothing when the stage is unknown", () => {
+    const { container } = render(<LifecycleBadge lifecycle={{}} stage={null} stages={STAGES} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("ignores built-in phase dates on a type with its own stages", () => {
+    const { container } = render(
+      <LifecycleBadge lifecycle={{ active: "2000-01-01" }} stages={STAGES} />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("shows a stage the vocabulary no longer defines by its key", () => {
+    render(<LifecycleBadge stage="legacy" stages={STAGES} />);
+    expect(screen.getByText("legacy")).toBeInTheDocument();
+  });
+
+  it("shows an explicit built-in phase with no dates", () => {
+    render(<LifecycleBadge lifecycle={{}} stage="phaseOut" />);
+    expect(screen.getByText("Phase Out")).toBeInTheDocument();
+  });
+
+  it("treats an empty vocabulary as the built-in phases", () => {
+    render(<LifecycleBadge lifecycle={{ active: "2000-01-01" }} stages={[]} />);
+    expect(screen.getByText("Active")).toBeInTheDocument();
+  });
+});

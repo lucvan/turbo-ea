@@ -157,7 +157,7 @@ En este modo, el servidor se autentica con correo/contraseña y renueva el token
 
 ## Capacidades disponibles
 
-El servidor MCP expone **51 herramientas** repartidas en dos grupos: **32 herramientas de lectura** que consultan datos de EA y **19 herramientas de escritura** (14 aditivas, 5 destructivas) que crean y mantienen fichas, relaciones, diagramas, riesgos, ADRs y más — incluida la conversión de artefactos que una herramienta de IA tiene en su propio contexto (hojas de cálculo, BPMN XML, DrawIO XML, documentos, imágenes) en datos EA estructurados. Cada herramienta lleva `ToolAnnotations` de MCP (indicaciones de solo lectura / destructiva / idempotente) para que los conectores puedan mostrar la destructividad en su interfaz.
+El servidor MCP expone **52 herramientas** repartidas en dos grupos: **32 herramientas de lectura** que consultan datos de EA y **20 herramientas de escritura** (15 aditivas, 5 destructivas) que crean y mantienen fichas, relaciones, diagramas, riesgos, ADRs y más — incluida la conversión de artefactos que una herramienta de IA tiene en su propio contexto (hojas de cálculo, BPMN XML, DrawIO XML, documentos, imágenes) en datos EA estructurados. Cada herramienta lleva `ToolAnnotations` de MCP (indicaciones de solo lectura / destructiva / idempotente) para que los conectores puedan mostrar la destructividad en su interfaz.
 
 ### Seguridad mediante ejecución en seco en las escrituras
 
@@ -248,14 +248,15 @@ Todas las herramientas respetan el RBAC del usuario autenticado — una visualiz
 
 ### Herramientas de escritura
 
-El servidor expone 19 herramientas de escritura, cada una anotada como **aditiva** (crea o amplía datos) o **destructiva** (modifica o elimina datos existentes) para que los conectores puedan advertir en consecuencia.
+El servidor expone 20 herramientas de escritura, cada una anotada como **aditiva** (crea o amplía datos) o **destructiva** (modifica o elimina datos existentes) para que los conectores puedan advertir en consecuencia.
 
-**Aditivas (14)**
+**Aditivas (15)**
 
 | Herramienta | Descripción |
 |-------------|-------------|
 | `create_cards_bulk` | Crea varias fichas en una sola llamada (por ejemplo, filas de hoja de cálculo). Admite referencias al padre por nombre dentro del mismo lote, con ordenación topológica en el servidor. |
 | `transition_card_lifecycle` | Mueve una ficha a través de las fases de aprobación o de ciclo de vida. |
+| `set_card_lifecycle_stage` | Registra la etapa actual del ciclo de vida de una ficha sin fecha; una etapa vacía la borra. |
 | `create_risks` | Crea entradas en el registro de riesgos EA. |
 | `update_risks` | Actualiza entradas del registro de riesgos (campos, fichas vinculadas). |
 | `add_card_comment` | Publica un comentario en una ficha — una nota no destructiva y revisable en lugar de modificar campos. |
@@ -297,7 +298,7 @@ Defensa en profundidad sobre la ejecución en seco, para que un descuido del LLM
 
 - **Límite de tamaño por llamada.** Las herramientas de escritura MCP aplican un límite mucho menor que los endpoints subyacentes del importador de Excel: 200 filas para `create_cards_bulk`, 500 operaciones para `upsert_relations_bulk`. Suficientemente grandes para cualquier carga realista de un artefacto, suficientemente pequeñas para que una vista previa de ejecución en seco siga siendo revisable.
 - **Sin eliminación de relaciones por defecto.** `upsert_relations_bulk` rechaza operaciones `action: "delete"` — para eliminar relaciones, use la interfaz web donde la acción queda registrada bajo la identidad del usuario. Los operadores pueden activarlo estableciendo `MCP_ALLOW_RELATION_DELETE=true`.
-- **Interruptor de apagado.** `MCP_WRITES_ENABLED=false` desactiva las 19 herramientas de escritura sin redesplegar código. Las 32 herramientas de lectura siguen funcionando.
+- **Interruptor de apagado.** `MCP_WRITES_ENABLED=false` desactiva las 20 herramientas de escritura sin redesplegar código. Las 32 herramientas de lectura siguen funcionando.
 - **La descarga de logotipos está restringida a hosts permitidos.** Los paquetes de iconos incluidos no pueden cubrir todos los productos de un cliente, y un asistente suele estar aislado sin acceso a la web, así que `set_card_logos` acepta una `image_url` que descarga el servidor MCP. Solo `https`, solo los hosts de `MCP_LOGO_FETCH_HOSTS`, solo direcciones públicas, como máximo dos redirecciones (revisadas de nuevo cada una), como máximo 1 MB leído en streaming, y los bytes deben llevar una firma real de PNG/JPEG/WebP/GIF. La descarga ocurre en el borde MCP, nunca en el backend, y después la imagen se sube por la vía habitual: una URL elegida por un LLM nunca llega al proceso que guarda la base de datos. `MCP_LOGO_FETCH_ENABLED=false` lo desactiva.
 - **Etiqueta de origen para auditoría.** Cada solicitud al backend desde el servidor MCP lleva un encabezado `X-Turbo-EA-Origin: mcp`. Los eventos emitidos desde esas solicitudes se etiquetan con `origin: "mcp"` en el payload del registro de auditoría, de modo que los administradores pueden filtrar las escrituras impulsadas por MCP de la línea de tiempo, separadas de las acciones de la interfaz web.
 - **Lotes de mutación.** Cada llamada de escritura MCP abre un lote de mutación antes de cualquier escritura; cada evento emitido durante la llamada se sella con el id del lote. Los administradores (o la herramienta `get_change_history`) pueden reconstruir el diff completo, evento por evento, de un commit a partir de un solo id, y `rollback_batch` puede revertirlo. Los commits que superan `MCP_BATCH_CONFIRMATION_THRESHOLD` filas deben devolver un `confirm_token` de un solo uso emitido por la ejecución en seco previa (validez de 15 minutos), de modo que un commit grande siempre sigue a una vista previa revisada.

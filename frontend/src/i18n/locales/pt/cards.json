@@ -707,5 +707,12 @@
   "todos.recurrence.years_one": "Todos os anos",
   "todos.recurrence.years_other": "A cada {{count}} anos",
   "utils.cardId.tooltip": "Clique para copiar",
-  "utils.cardId.copied": "Copiado!"
+  "utils.cardId.copied": "Copiado!",
+  "lifecycle.currentStage": "Etapa atual",
+  "lifecycle.currentStageHelp": "Registe a etapa tal como está hoje. Não é necessária data.",
+  "lifecycle.notStated": "Não indicada (usar as datas)",
+  "lifecycle.unknown": "Desconhecida",
+  "lifecycle.stated": "indicada",
+  "lifecycle.fromDates": "a partir das datas",
+  "lifecycle.datesDisagree": "Pelas datas, esta ficha está em {{stage}}"
 }

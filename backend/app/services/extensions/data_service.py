@@ -63,6 +63,7 @@ from app.models.user import User
 from app.services import (
     card_lifecycle,
     card_write_service,
+    lifecycle_stages,
     mutation_batch_service,
     stakeholder_service,
     tag_service,
@@ -603,13 +604,14 @@ class ExtensionData:
             return {}
         hidden_types_sq = select(CardType.key).where(CardType.is_hidden == True)  # noqa: E712
         q = (
-            select(Card.id, Card.attributes, Card.lifecycle)
+            select(Card.id, Card.type, Card.attributes, Card.lifecycle, Card.lifecycle_stage)
             .where(Card.id.in_(id_list), Card.type.not_in(hidden_types_sq))
             .where(Card.status == "ACTIVE")
         )
         async with async_session() as db:
             rows = (await db.execute(q)).all()
-        snapshots = [_EolCardSnapshot(r.id, r.attributes or {}, r.lifecycle or {}) for r in rows]
+            lc_view = await lifecycle_stages.lifecycle_view(db)
+        snapshots = [_EolCardSnapshot(r.id, r.attributes or {}, lc_view(r) or {}) for r in rows]
         resolved = await resolve_eol_statuses(snapshots)
         return {
             cid: ExtEolStatus(

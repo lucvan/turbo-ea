@@ -1,3 +1,4 @@
+import { customStagesOf } from "@/lib/lifecycleStages";
 import * as XLSX from "xlsx";
 
 import { api } from "@/api/client";
@@ -330,7 +331,11 @@ function buildCardRowForType(
       .join(LIST_SEPARATOR),
   };
 
-  for (const phase of LIFECYCLE_PHASES) {
+  // The stated stage as its raw key (it round-trips), then one date column
+  // per stage of this type — its own vocabulary, or the built-in phases.
+  row.lifecycle_stage = card.lifecycle_stage ?? "";
+  const stageKeys = customStagesOf(type)?.map((s) => s.key) ?? LIFECYCLE_PHASES;
+  for (const phase of stageKeys) {
     row[`lifecycle_${phase}`] = (card.lifecycle || {})[phase] ?? "";
   }
 

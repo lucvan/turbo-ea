@@ -13,6 +13,7 @@ import MaterialSymbol from "@/components/MaterialSymbol";
 import CardLogoAvatar from "@/components/CardLogoAvatar";
 import ApprovalStatusBadge from "@/components/ApprovalStatusBadge";
 import LifecycleBadge from "@/components/LifecycleBadge";
+import { useLifecycleStages } from "@/hooks/useLifecycleStages";
 import AiSuggestPanel, { type AiApplyPayload } from "@/components/AiSuggestPanel";
 import { useMetamodel } from "@/hooks/useMetamodel";
 import { useTypeLabel } from "@/hooks/useResolveLabel";
@@ -55,6 +56,7 @@ interface Props {
 export default function CardDetailSidePanel({ cardId, open, onClose }: Props) {
   const navigate = useNavigate();
   const { t } = useTranslation("common");
+  const { customStages } = useLifecycleStages();
   const { getType } = useMetamodel();
   const typeLabel = useTypeLabel();
   const resolveSubtypeLabel = useCardSubtypeLabel();
@@ -212,7 +214,11 @@ export default function CardDetailSidePanel({ cardId, open, onClose }: Props) {
               }}
             >
               <DataQualityPill value={card.data_quality} />
-              <LifecycleBadge lifecycle={card.lifecycle} />
+              <LifecycleBadge
+                lifecycle={card.lifecycle}
+                stage={card.lifecycle_stage}
+                stages={customStages(card.type)}
+              />
               <ApprovalStatusBadge status={card.approval_status} />
             </Box>
           )}

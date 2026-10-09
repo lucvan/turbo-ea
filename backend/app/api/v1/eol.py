@@ -20,6 +20,7 @@ from app.api.deps import get_current_user
 from app.database import get_db
 from app.models.card import Card
 from app.models.user import User
+from app.services import lifecycle_stages
 from app.services.card_flags import EOL_TYPES
 from app.services.card_read_scope import CardReadScope
 from app.services.eol_service import resolve_eol_statuses
@@ -322,7 +323,10 @@ async def eol_card_status(
         .where(Card.status == "ACTIVE")
         .where(*read_scope.where(Card, mode="module"))
     )
-    cards = result.scalars().all()
+    # Project each card's lifecycle onto the built-in phase names first, so a
+    # type with its own stages has its retirement date read as End of Life.
+    lc_view = await lifecycle_stages.lifecycle_view(db)
+    cards = [lc_view.proxy(c) for c in result.scalars().all()]
     # Hand the connection back BEFORE the outbound round-trip. `get_db` is a
     # yield-dependency, so without this commit the read above would pin one of
     # the pool's 30 connections for the whole endoflife.date fetch — and this

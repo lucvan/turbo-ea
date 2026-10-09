@@ -1,3 +1,4 @@
+import { customStagesOf } from "@/lib/lifecycleStages";
 import * as XLSX from "xlsx";
 
 import { api } from "@/api/client";
@@ -321,6 +322,13 @@ function str(v: unknown): string {
   return String(v).trim();
 }
 
+/** The dated lifecycle columns a type's rows may carry: one per stage of its
+ *  own vocabulary, or the built-in phases. */
+function stageKeysForType(type: string, allTypes: CardType[]): readonly string[] {
+  const custom = customStagesOf(allTypes.find((x) => x.key === type));
+  return custom ? custom.map((s) => s.key) : LIFECYCLE_PHASES;
+}
+
 function fieldDefsForType(
   type: string,
   allTypes: CardType[],
@@ -419,11 +427,18 @@ function buildPatch(
     }
   }
 
+  // The stated stage: a filled cell sets it; a blank cell leaves it alone.
+  if (d.lifecycle_stage && d.lifecycle_stage !== (ex.lifecycle_stage ?? "")) {
+    patch.lifecycle_stage = d.lifecycle_stage;
+    changes.lifecycle_stage = { old: ex.lifecycle_stage ?? null, new: d.lifecycle_stage };
+  }
+
   // Lifecycle: compare phase-by-phase
   if (d.lifecycle) {
     const newLc = d.lifecycle as Record<string, string>;
     const exLc = (ex.lifecycle || {}) as Record<string, string>;
-    for (const phase of LIFECYCLE_PHASES) {
+    // Every stage either side carries, so a type's own stages are compared too.
+    for (const phase of new Set([...LIFECYCLE_PHASES, ...Object.keys(newLc)])) {
       if ((newLc[phase] ?? "") !== (exLc[phase] ?? "")) {
         patch.lifecycle = d.lifecycle;
         changes[`lifecycle_${phase}`] = {
@@ -626,7 +641,9 @@ export function validateImport(
     "id", "type", "name", "description", "subtype", "parent_id", "parent_path",
     "parent_label",
     "external_id", "reference", "alias", "approval_status", "tags",
+    "lifecycle_stage",
     ...LIFECYCLE_PHASES.map((p) => `lifecycle_${p}`),
+    ...allTypes.flatMap((ct) => (customStagesOf(ct) ?? []).map((st) => `lifecycle_${st.key}`)),
   ]);
   // Build set of all known attribute columns across all types
   const allAttrKeys = new Set<string>();
@@ -919,7 +936,7 @@ export function validateImport(
     // Build lifecycle object
     const lifecycle: Record<string, string> = {};
     let rowHasLifecycleError = false;
-    for (const phase of LIFECYCLE_PHASES) {
+    for (const phase of stageKeysForType(type, allTypes)) {
       const val = str(raw[`lifecycle_${phase}`]);
       if (val) {
         // Rule 13: lifecycle dates
@@ -1206,6 +1223,11 @@ export function validateImport(
     if (externalId) data.external_id = externalId;
     if (alias) data.alias = alias;
     if (Object.keys(lifecycle).length > 0) data.lifecycle = lifecycle;
+    // The stated stage needs no date. A blank cell is "unknown" on a new card
+    // and "leave it alone" on an existing one — never a default stage. The
+    // server refuses a key the type does not define, with the valid list.
+    const lifecycleStage = str(raw["lifecycle_stage"]);
+    if (lifecycleStage) data.lifecycle_stage = lifecycleStage;
     if (Object.keys(attributes).length > 0) data.attributes = attributes;
 
     const parsed: ParsedRow = {
@@ -2331,6 +2353,7 @@ export async function executeMultiSheetImport(
           parent_name: parentId ? undefined : lastSeg,
           parent_path: parentId ? undefined : parentPath,
           lifecycle: d.lifecycle as Record<string, unknown> | undefined,
+          lifecycle_stage: d.lifecycle_stage as string | undefined,
           attributes: d.attributes as Record<string, unknown> | undefined,
           external_id: d.external_id as string | undefined,
           alias: d.alias as string | undefined,

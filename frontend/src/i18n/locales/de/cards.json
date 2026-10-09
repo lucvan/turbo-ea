@@ -707,5 +707,12 @@
   "todos.recurrence.years_one": "Jedes Jahr",
   "todos.recurrence.years_other": "Alle {{count}} Jahre",
   "utils.cardId.tooltip": "Zum Kopieren klicken",
-  "utils.cardId.copied": "Kopiert!"
+  "utils.cardId.copied": "Kopiert!",
+  "lifecycle.currentStage": "Aktuelle Phase",
+  "lifecycle.currentStageHelp": "Erfassen Sie die Phase, wie sie heute ist. Ein Datum ist nicht nötig.",
+  "lifecycle.notStated": "Nicht angegeben (Daten verwenden)",
+  "lifecycle.unknown": "Unbekannt",
+  "lifecycle.stated": "angegeben",
+  "lifecycle.fromDates": "aus den Daten",
+  "lifecycle.datesDisagree": "Nach den Daten befindet sich diese Karte in {{stage}}"
 }

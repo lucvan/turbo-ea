@@ -27,7 +27,7 @@ from app.models.resource_type import ResourceType
 from app.models.role import Role
 from app.models.stakeholder import Stakeholder
 from app.models.user import User
-from app.services import card_reference
+from app.services import card_reference, lifecycle_stages
 from app.services.extensions.registry import extension_registry
 from app.services.hierarchy import (
     HIERARCHY_LEVEL_KEY,
@@ -190,6 +190,73 @@ async def _validated_role_permissions(db: AsyncSession, raw: object) -> dict:
         raise HTTPException(400, str(exc)) from exc
 
 
+async def _apply_lifecycle_config(
+    db: AsyncSession,
+    type_key: str,
+    old_config: dict | None,
+    raw: object,
+    reassign: object,
+) -> dict:
+    """Validate a new stage vocabulary and guard the stages it drops.
+
+    A stage that cards still use — as their explicit stage or under a dated
+    key — cannot simply vanish from the vocabulary. The save is refused unless
+    ``lifecycle_reassign`` (``{removed_key: remaining_key}``) says where each
+    such stage's cards go, and then both the explicit stage and the date move.
+    Nothing is ever reinterpreted on the caller's behalf.
+    """
+    try:
+        new_config = lifecycle_stages.validate_lifecycle_config(raw)
+    except lifecycle_stages.LifecycleConfigError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    removed = lifecycle_stages.removed_stage_keys(old_config, new_config)
+    if not removed:
+        return new_config
+    usage = await lifecycle_stages.stage_usage(db, type_key, removed)
+    if not usage:
+        return new_config
+
+    mapping = reassign if isinstance(reassign, dict) else {}
+    remaining = lifecycle_stages.stage_keys(lifecycle_stages.stages_for(new_config))
+    unmapped = {k: n for k, n in usage.items() if mapping.get(k) not in remaining}
+    if unmapped:
+        details = ", ".join(f"'{k}' ({n} card(s))" for k, n in unmapped.items())
+        raise HTTPException(
+            400,
+            {
+                "code": "lifecycle_stage_in_use",
+                "message": (
+                    f"Cannot remove lifecycle stages that are in use: {details}. "
+                    "Reassign their cards to a remaining stage first."
+                ),
+                "in_use": unmapped,
+                "valid_stages": remaining,
+            },
+        )
+    for old in usage:
+        new = mapping[old]
+        conflicts = await lifecycle_stages.reassignment_conflicts(db, type_key, old, new)
+        if conflicts:
+            raise HTTPException(
+                400,
+                {
+                    "code": "lifecycle_reassign_conflict",
+                    "message": (
+                        f"Cannot reassign lifecycle stage '{old}' to '{new}': {conflicts} "
+                        "card(s) have a date for both, and one would be lost. "
+                        "Resolve those cards first."
+                    ),
+                    "from": old,
+                    "to": new,
+                    "cards": conflicts,
+                },
+            )
+    for old in usage:
+        await lifecycle_stages.reassign_stage(db, type_key, old, mapping[old])
+    return new_config
+
+
 def _serialize_type(t: CardType, *, include_role_permissions: bool = True) -> dict:
     """Serialise a card type.
 
@@ -211,6 +278,10 @@ def _serialize_type(t: CardType, *, include_role_permissions: bool = True) -> di
         "allow_card_logo": t.allow_card_logo,
         "subtypes": t.subtypes or [],
         "hierarchy_labels": t.hierarchy_labels or [],
+        # The stored vocabulary ({} = built-in model) and the stages that are
+        # actually in force, so no client has to re-derive the default.
+        "lifecycle_config": t.lifecycle_config or {},
+        "lifecycle_stages": lifecycle_stages.stages_for(t.lifecycle_config),
         "fields_schema": t.fields_schema or [],
         "stakeholder_roles": t.stakeholder_roles or [],
         "section_config": t.section_config or {},
@@ -865,6 +936,10 @@ async def create_type(
     except card_reference.ReferenceConfigError as exc:
         raise HTTPException(400, str(exc)) from exc
     role_permissions = await _validated_role_permissions(db, body.get("role_permissions"))
+    try:
+        lifecycle_config = lifecycle_stages.validate_lifecycle_config(body.get("lifecycle_config"))
+    except lifecycle_stages.LifecycleConfigError as exc:
+        raise HTTPException(400, str(exc)) from exc
     t = CardType(
         key=body["key"],
         label=body["label"],
@@ -877,6 +952,7 @@ async def create_type(
         allow_card_logo=body.get("allow_card_logo", False),
         subtypes=body.get("subtypes", []),
         hierarchy_labels=body.get("hierarchy_labels", []),
+        lifecycle_config=lifecycle_config,
         fields_schema=fields_schema,
         stakeholder_roles=body.get("stakeholder_roles", default_roles),
         reference_config=reference_config,
@@ -1035,6 +1111,12 @@ async def update_type(
         # (POST /types/{key}/generate-references), so an unrelated type Save can
         # never mint thousands of IDs by surprise. New cards still auto-generate
         # on create; only the historical backlog is generated on demand.
+
+    # ── Lifecycle stage vocabulary ──
+    if "lifecycle_config" in body:
+        t.lifecycle_config = await _apply_lifecycle_config(
+            db, key, t.lifecycle_config, body["lifecycle_config"], body.get("lifecycle_reassign")
+        )
 
     # ── Per-card-type role permission overrides (discussion #1068) ──
     # Deliberately outside the generic `updatable` loop: the payload is

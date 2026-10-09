@@ -187,6 +187,15 @@ export function parseDate(s: string | undefined): number | null {
   return isNaN(d.getTime()) ? null : d.getTime();
 }
 
+/**
+ * Reserved, non-date member of a report's lifecycle map. Reports receive every
+ * card's lifecycle under the built-in phase names, whatever its type calls its
+ * stages; where the card's stated stage says something no date does — retired
+ * with no retirement date, or not yet operational with no start date — the
+ * server adds it here, so no date has to be invented for the card.
+ */
+export const STAGE_SEMANTIC_KEY = "_semantic";
+
 /** A bare lifecycle map (`plan`/`phaseIn`/`active`/`phaseOut`/`endOfLife` → ISO date). */
 export type Lifecycle = Record<string, string> | undefined;
 
@@ -214,13 +223,18 @@ const PLANNED_PHASES = ["plan", "phaseIn"];
 export function hasStartedByDate(lifecycle: Lifecycle, dateMs: number): boolean {
   const active = parseDate(lifecycle?.active);
   if (active != null) return active <= dateMs;
+  // A card stated to be pre-operational, with no date saying so, has not
+  // started either (`STAGE_SEMANTIC_KEY`).
+  if (lifecycle?.[STAGE_SEMANTIC_KEY] === "pre_operational") return false;
   return !PLANNED_PHASES.some((p) => parseDate(lifecycle?.[p]) != null);
 }
 
 /** Whether the card has reached end of life by `dateMs` (inclusive). */
 export function isRetiredByDate(lifecycle: Lifecycle, dateMs: number): boolean {
   const eol = parseDate(lifecycle?.endOfLife);
-  return eol != null && eol <= dateMs;
+  if (eol != null) return eol <= dateMs;
+  // Stated as retired with no retirement date: retired, at whatever date.
+  return lifecycle?.[STAGE_SEMANTIC_KEY] === "retired";
 }
 
 /** Whether the card is part of the landscape at `dateMs`: born, not yet retired. */

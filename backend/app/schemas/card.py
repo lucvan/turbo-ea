@@ -69,6 +69,10 @@ class CardCreate(BaseModel):
     # ``hierarchy_labels`` vocabulary (#1100). Refused when no parent is set.
     parent_label: str | None = None
     lifecycle: dict | None = None
+    # Explicit current lifecycle stage — a key of the card type's stage
+    # vocabulary, recorded without a date. ``null`` clears it, leaving the
+    # stage to be derived from the ``lifecycle`` dates.
+    lifecycle_stage: str | None = None
     attributes: dict | None = None
     external_id: str | None = None
     alias: str | None = None
@@ -105,6 +109,10 @@ class CardUpdate(BaseModel):
     # ``null`` clears it. Clearing ``parent_id`` clears it either way.
     parent_label: str | None = None
     lifecycle: dict | None = None
+    # Explicit current lifecycle stage — a key of the card type's stage
+    # vocabulary, recorded without a date. ``null`` clears it, leaving the
+    # stage to be derived from the ``lifecycle`` dates.
+    lifecycle_stage: str | None = None
     attributes: dict | None = None
     status: str | None = None
     external_id: str | None = None
@@ -166,6 +174,10 @@ class CardResponse(BaseModel):
     parent_id: str | None = None
     parent_label: str | None = None
     lifecycle: dict | None = None
+    # Explicit current lifecycle stage — a key of the card type's stage
+    # vocabulary, recorded without a date. ``null`` clears it, leaving the
+    # stage to be derived from the ``lifecycle`` dates.
+    lifecycle_stage: str | None = None
     attributes: dict | None = None
     status: str
     approval_status: str
@@ -451,6 +463,10 @@ class CardBulkCreateItem(BaseModel):
     parent_name: str | None = None
     parent_label: str | None = None
     lifecycle: dict | None = None
+    # Explicit current lifecycle stage — a key of the card type's stage
+    # vocabulary, recorded without a date. ``null`` clears it, leaving the
+    # stage to be derived from the ``lifecycle`` dates.
+    lifecycle_stage: str | None = None
     attributes: dict | None = None
     external_id: str | None = None
     alias: str | None = None

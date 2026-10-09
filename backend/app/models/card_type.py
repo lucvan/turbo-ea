@@ -30,6 +30,11 @@ class CardType(Base, UUIDMixin, TimestampMixin):
     # (discussion #1100): [{key, label, color, translations}]. Empty means the
     # feature is invisible, which is why every pre-existing install is unchanged.
     hierarchy_labels: Mapped[list | None] = mapped_column(JSONB, default=list, server_default="[]")
+    # Ordered lifecycle stage vocabulary for this type's cards:
+    # {"stages": [{key, label, color, semantic, translations}]}. Empty means the
+    # built-in five-phase model, which is why every pre-existing install is
+    # unchanged. See ``services/lifecycle_stages.py``.
+    lifecycle_config: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     fields_schema: Mapped[list] = mapped_column(JSONB, default=list)
     stakeholder_roles: Mapped[list | None] = mapped_column(JSONB, default=list)  # [{key, label}]
     section_config: Mapped[dict | None] = mapped_column(

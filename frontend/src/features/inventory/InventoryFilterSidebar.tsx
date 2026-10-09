@@ -36,6 +36,7 @@ import ColumnFreezeToggle from "@/components/grid/ColumnFreezeToggle";
 import ColumnOrderSection, {
   type ColumnOrderItem,
 } from "@/components/grid/ColumnOrderSection";
+import { customStagesOf } from "@/lib/lifecycleStages";
 import { useTypeLabel, useSubtypeLabel, useFieldLabel, useOptionLabel, useRelationLabel } from "@/hooks/useResolveLabel";
 import { api } from "@/api/client";
 import { readableTextColor } from "@/lib/color";
@@ -405,6 +406,28 @@ export default function InventoryFilterSidebar({
   const stLabel = useSubtypeLabel();
   const fieldLabel = useFieldLabel();
   const optLabel = useOptionLabel();
+  // The Lifecycle chips: the stages of the selected types (of every type when
+  // none is selected), de-duplicated by key. Built-in phases keep their
+  // translated labels and shipped colours; a type's own stages bring theirs.
+  const lifecycleVocab = useMemo(() => {
+    const scope = filters.types.length
+      ? types.filter((ct) => filters.types.includes(ct.key))
+      : types.filter((ct) => !ct.is_hidden);
+    const out: { key: string; label: string; color: string }[] = [];
+    const seen = new Set<string>();
+    const add = (key: string, label: string, color: string) => {
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ key, label, color });
+    };
+    if (scope.length === 0 || scope.some((ct) => !customStagesOf(ct))) {
+      for (const p of LIFECYCLE_PHASES) add(p.key, t(p.tKey), p.color);
+    }
+    for (const ct of scope) {
+      for (const st of customStagesOf(ct) ?? []) add(st.key, optLabel(st), st.color);
+    }
+    return out;
+  }, [types, filters.types, t, optLabel]);
   const sidebarPrefsRef = useRef(loadSidebarPrefs());
   const [tab, setTab] = useState(() => sidebarPrefsRef.current.tab ?? 0);
   // Which saved view is currently applied (highlighted in the list). Persisted
@@ -1133,10 +1156,10 @@ export default function InventoryFilterSidebar({
               />
               <Collapse in={expandedSections.lifecycle}>
                 <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mb: 2, px: 0.5 }}>
-                  {LIFECYCLE_PHASES.map((p) => (
+                  {lifecycleVocab.map((p) => (
                     <Chip
                       key={p.key}
-                      label={t(p.tKey)}
+                      label={p.label}
                       size="small"
                       onClick={() => toggleLifecyclePhase(p.key)}
                       variant={filters.lifecyclePhases.includes(p.key) ? "filled" : "outlined"}

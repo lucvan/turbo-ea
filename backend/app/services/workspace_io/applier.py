@@ -426,7 +426,12 @@ async def _apply_card_types(db, bundle: WorkspaceBundle, sr: SectionResult, dry_
         # column and leave the cell blank, which `from_cell` reads as None and
         # the insert would reject. An absent column is still left alone (see
         # `_coerce`) — this only normalises a declared-but-empty cell.
-        for not_null_json in ("reference_config", "role_permissions", "translations"):
+        for not_null_json in (
+            "reference_config",
+            "role_permissions",
+            "translations",
+            "lifecycle_config",
+        ):
             if not_null_json in data and data[not_null_json] is None:
                 data[not_null_json] = {}
         key = data.get("key")
@@ -859,6 +864,9 @@ def _make_cards_applier(user: User):
                         data.get("parent_label") if resolved_parent is not None else None
                     ),
                     lifecycle=data.get("lifecycle") or {},
+                    # Carried as stored: the bundle's card types (applied
+                    # first) bring the vocabulary the stage belongs to.
+                    lifecycle_stage=data.get("lifecycle_stage") or None,
                     attributes=data.get("attributes") or {},
                     external_id=external_id,
                     reference=resolved_reference,

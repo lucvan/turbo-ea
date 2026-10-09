@@ -157,7 +157,7 @@ I denne tilstand autentificerer serveren sig med e-mail/adgangskode og fornyer t
 
 ## Tilgængelige funktioner
 
-MCP-serveren eksponerer **51 værktøjer** på tværs af to grupper: **32 læseværktøjer**, der forespørger EA-data, og **19 skriveværktøjer** (14 additive, 5 destruktive), der opretter og vedligeholder kort, relationer, diagrammer, risici, ADR'er og mere — herunder omdannelse af artefakter, som et AI-værktøj har i sin egen kontekst (regneark, BPMN XML, DrawIO XML, dokumenter, billeder), til strukturerede EA-data. Hvert værktøj bærer MCP-`ToolAnnotations` (skrivebeskyttet / destruktiv / idempotent-hints), så connectors kan vise destruktivitet i deres UI.
+MCP-serveren eksponerer **52 værktøjer** på tværs af to grupper: **32 læseværktøjer**, der forespørger EA-data, og **20 skriveværktøjer** (15 additive, 5 destruktive), der opretter og vedligeholder kort, relationer, diagrammer, risici, ADR'er og mere — herunder omdannelse af artefakter, som et AI-værktøj har i sin egen kontekst (regneark, BPMN XML, DrawIO XML, dokumenter, billeder), til strukturerede EA-data. Hvert værktøj bærer MCP-`ToolAnnotations` (skrivebeskyttet / destruktiv / idempotent-hints), så connectors kan vise destruktivitet i deres UI.
 
 ### Dry-run-sikkerhed på skrivninger
 
@@ -248,14 +248,15 @@ Alle værktøjer er bundet af den autentificerede brugers RBAC — en viewer vil
 
 ### Skriveværktøjer
 
-Serveren eksponerer 19 skriveværktøjer, hver annoteret som **additiv** (opretter eller udvider data) eller **destruktiv** (ændrer eller fjerner eksisterende data), så connectors kan advare tilsvarende.
+Serveren eksponerer 20 skriveværktøjer, hver annoteret som **additiv** (opretter eller udvider data) eller **destruktiv** (ændrer eller fjerner eksisterende data), så connectors kan advare tilsvarende.
 
-**Additive (14)**
+**Additive (15)**
 
 | Værktøj | Beskrivelse |
 |------|-------------|
 | `create_cards_bulk` | Opret mange kort i ét kald (f.eks. regnearksrækker). Understøtter samme-batch-forældrereferencer efter navn med server-side topologisk sortering. |
 | `transition_card_lifecycle` | Flyt et kort gennem godkendelses- eller livscyklusfaser. |
+| `set_card_lifecycle_stage` | Registrer et korts aktuelle livscyklusfase uden dato; en tom fase rydder den. |
 | `create_risks` | Opret poster i EA-risikoregisteret. |
 | `update_risks` | Opdater risikoregister-poster (felter, tilknyttede kort). |
 | `add_card_comment` | Skriv en kommentar på et kort — en ikke-destruktiv, gennemgåelig note i stedet for at mutere felter. |
@@ -297,7 +298,7 @@ Forsvar i dybden ovenpå dry-run, så en LLM-fejltagelse ikke kan forårsage mas
 
 - **Per-kald-størrelsesgrænser.** MCP-skriveværktøjerne håndhæver en meget mindre grænse end de underliggende Excel-importør-endpoints: 200 rækker for `create_cards_bulk`, 500 operationer for `upsert_relations_bulk`. Stort nok til enhver realistisk enkelt artefakt-upload, lille nok til, at en dry-run-forhåndsvisning stadig kan gennemses.
 - **Ingen relationssletning som standard.** `upsert_relations_bulk` afviser `action: "delete"`-operationer — for at fjerne relationer, brug web-UI'et, hvor handlingen registreres under brugerens identitet. Operatører kan tilvælge ved at indstille `MCP_ALLOW_RELATION_DELETE=true`.
-- **Kill switch.** `MCP_WRITES_ENABLED=false` slår alle 19 skriveværktøjer fra uden at re-deploye kode. De 32 læseværktøjer fortsætter med at virke.
+- **Kill switch.** `MCP_WRITES_ENABLED=false` slår alle 20 skriveværktøjer fra uden at re-deploye kode. De 32 læseværktøjer fortsætter med at virke.
 - **Logo-hentning sker kun fra tilladte værter.** De medfølgende ikonpakker kan ikke dække alle produkter hos en kunde, og en assistent kører ofte i en sandkasse uden adgang til nettet, så `set_card_logos` accepterer en `image_url`, som MCP-serveren henter. Kun `https`, kun værter fra `MCP_LOGO_FETCH_HOSTS`, kun offentlige adresser, højst to omdirigeringer (hver kontrolleret på ny), højst 1 MB læst som stream, og byte-strømmen skal bære en ægte PNG/JPEG/WebP/GIF-signatur. Hentningen sker i MCP-kanten, aldrig i backend'en, og billedet uploades derefter ad den almindelige vej — en URL valgt af en sprogmodel når aldrig den proces, der holder databasen. `MCP_LOGO_FETCH_ENABLED=false` slår det fra.
 - **Audit origin-tag.** Hver backend-anmodning fra MCP-serveren bærer en `X-Turbo-EA-Origin: mcp`-header. Hændelser udsendt fra disse anmodninger er tagget `origin: "mcp"` i revisions-log-payloaden, så admins kan filtrere MCP-drevne skrivninger ud af tidslinjen adskilt fra web-UI-handlinger.
 - **Mutations-batches.** Hvert MCP-skrivekald åbner en mutations-batch før nogen skrivninger; hver hændelse udsendt under kaldet stemples med batch-id'et. Admins (eller værktøjet `get_change_history`) kan rekonstruere den fulde per-hændelses-diff for en commit fra ét id, og `rollback_batch` kan tilbagerulle den. Commits over `MCP_BATCH_CONFIRMATION_THRESHOLD` rækker skal ekko en engangs-`confirm_token` udstedt af den forudgående dry-run (15 minutters TTL), så en stor commit altid følger efter en gennemgået forhåndsvisning.

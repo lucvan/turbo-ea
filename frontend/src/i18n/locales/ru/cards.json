@@ -707,5 +707,12 @@
   "todos.recurrence.years_one": "Каждый год",
   "todos.recurrence.years_other": "Каждые {{count}} лет",
   "utils.cardId.tooltip": "Нажмите, чтобы скопировать",
-  "utils.cardId.copied": "Скопировано!"
+  "utils.cardId.copied": "Скопировано!",
+  "lifecycle.currentStage": "Текущая стадия",
+  "lifecycle.currentStageHelp": "Укажите стадию на сегодня. Дата не требуется.",
+  "lifecycle.notStated": "Не указана (по датам)",
+  "lifecycle.unknown": "Неизвестно",
+  "lifecycle.stated": "указана",
+  "lifecycle.fromDates": "по датам",
+  "lifecycle.datesDisagree": "По датам эта карточка на стадии {{stage}}"
 }
