@@ -100,4 +100,17 @@ describe("DescriptionSection — links in the description", () => {
     // The full stop after the address stays text.
     expect(screen.getByText(/Runbook:/)).toHaveTextContent("Runbook: https://wiki.example.com/erp.");
   });
+
+  it("renders a markdown description as formatted text", () => {
+    render(
+      <DescriptionSection
+        card={{ ...card, description: "## Purpose\n\n- **Ledger**\n- Reporting" } as Card}
+        onSave={async () => {}}
+        extraFields={[]}
+      />,
+    );
+    expect(screen.getByRole("heading", { level: 2, name: "Purpose" })).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.queryByText(/\*\*/)).toBeNull();
+  });
 });

@@ -21,6 +21,13 @@ dialog). Fork changes go through the same path:
 - In the dialog every section heading names its source: this fork, or upstream
   Turbo EA.
 
+## [2.158.0.3] - 2026-10-09
+
+No database migration.
+
+### Added
+- A card's description and its multi-line text fields are shown as formatted text when they contain markdown: headings, bold and italic, bulleted and numbered lists, tables, quotes, code and links. This applies to the card page and to an initiative's overview in PPM. Text without markdown looks as before, with line breaks kept and web addresses clickable. Editing is unchanged: you type the markdown in the same text box. Typed HTML is shown as text, and an image is shown as a link to it and is not loaded.
+
 ## [2.158.0.2] - 2026-10-09
 
 No database migration.
