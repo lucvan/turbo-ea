@@ -6,11 +6,11 @@ dry-run → confirm-token → commit flow (S2, S3).
 
 Routes:
 
-- ``POST /mutation-batches`` — open a new batch. Returns the id and,
-  for dry-run batches above the per-call confirmation threshold, a
-  ``confirm_token`` the matching commit call must echo back.
+- ``POST /mutation-batches`` — open a new batch. A dry-run above the
+  confirmation threshold is issued a ``confirm_token``; a write above it
+  must present that token here, where it is checked and spent.
 - ``POST /mutation-batches/{id}/commit`` — close the batch with a
-  per-row summary. Validates the confirm token when present.
+  per-row summary.
 - ``GET /mutation-batches`` — list batches (filters by actor / tool /
   origin / since). Permission: ``admin.events``.
 - ``GET /mutation-batches/{id}`` — single batch metadata.
@@ -52,12 +52,14 @@ from app.schemas.mutation_batch import (
 )
 from app.services.event_bus import request_origin
 from app.services.mutation_batch_service import (
+    CONFIRMATION_KEY,
+    ConfirmTokenError,
     batch_to_dict,
     commit_batch,
     create_batch,
     get_batch,
     issue_confirm_token,
-    verify_confirm_token,
+    redeem_confirm_token,
 )
 from app.services.permission_service import PermissionService
 from app.services.rollback_service import execute_rollback, plan_rollback
@@ -77,10 +79,11 @@ def _actor_name_for(batch: MutationBatch, users_by_id: dict) -> str | None:
     return user.display_name if user else None
 
 
-# Above this row count, the open call issues a confirm token that the
-# commit call must echo. Mirrors the MCP-side BATCH_CONFIRMATION_THRESHOLD
-# (default 20) — the backend value is a floor; the MCP wrapper can be
-# tightened independently via env.
+# Above this row count a dry-run is issued a confirm token and a write must
+# present one, unless the caller states its own decision through
+# ``require_confirmation``. The MCP server always does, from
+# ``MCP_BATCH_CONFIRMATION_THRESHOLD`` (default 20) and
+# ``MCP_REQUIRE_DRYRUN_FIRST``; this value covers a caller that says nothing.
 CONFIRM_TOKEN_THRESHOLD = 20
 
 
@@ -91,12 +94,48 @@ async def open_batch(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> MutationBatchOut:
-    """Open a mutation batch. Returns the batch id and, when the row
-    count exceeds the confirmation threshold on a dry-run, a one-shot
-    ``confirm_token`` the commit call must echo back."""
+    """Open a mutation batch.
+
+    A dry-run that needs confirmation is issued a one-shot ``confirm_token``
+    bound to this user, tool, row count and ``payload_hash``. A write that
+    needs confirmation must present that token here: it is checked and spent
+    before the batch exists, so a refused commit has written nothing.
+    """
+    needs_confirmation = (
+        body.require_confirmation
+        if body.require_confirmation is not None
+        else row_count > CONFIRM_TOKEN_THRESHOLD
+    )
     token: str | None = None
-    if body.dry_run and row_count > CONFIRM_TOKEN_THRESHOLD:
-        token = issue_confirm_token()
+    confirmation: dict | None = None
+    preview: MutationBatch | None = None
+    if body.dry_run:
+        if needs_confirmation:
+            token = issue_confirm_token()
+            confirmation = {"row_count": row_count, "payload_hash": body.payload_hash}
+    elif needs_confirmation or body.confirm_token:
+        try:
+            preview = await redeem_confirm_token(
+                db,
+                actor=user,
+                tool_name=body.tool_name,
+                row_count=row_count,
+                payload_hash=body.payload_hash,
+                token=body.confirm_token or "",
+            )
+        except ConfirmTokenError as exc:
+            raise HTTPException(
+                status_code=400, detail={"code": exc.code, "message": exc.message}
+            ) from None
+        confirmation = {
+            "preview_batch_id": str(preview.id),
+            "row_count": row_count,
+            "payload_hash": body.payload_hash,
+        }
+    elif row_count > CONFIRM_TOKEN_THRESHOLD:
+        # The caller waived confirmation for a batch this size. Keep that
+        # visible in the audit log.
+        confirmation = {"waived": True, "row_count": row_count}
     batch = await create_batch(
         db,
         tool_name=body.tool_name,
@@ -104,7 +143,15 @@ async def open_batch(
         origin=_origin(),
         dry_run=body.dry_run,
         confirm_token=token,
+        confirmation=confirmation,
     )
+    if preview is not None:
+        redeemed = dict(preview.summary or {})
+        redeemed[CONFIRMATION_KEY] = {
+            **(redeemed.get(CONFIRMATION_KEY) or {}),
+            "redeemed_by_batch_id": str(batch.id),
+        }
+        preview.summary = redeemed
     await db.commit()
     return MutationBatchOut(**batch_to_dict(batch, actor_display_name=user.display_name))
 
@@ -116,6 +163,10 @@ async def close_batch(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> MutationBatchOut:
+    """Close a batch with its summary. Closing never needs a confirm token:
+    a preview has nothing to confirm, and a write was confirmed when its
+    batch was opened. Demanding the token here is what made every dry-run
+    above the threshold fail after the preview had been computed."""
     batch = await get_batch(db, batch_id)
     if batch is None:
         raise HTTPException(status_code=404, detail="Mutation batch not found")
@@ -125,14 +176,6 @@ async def close_batch(
         # Cross-actor commit would let a second user finalise a batch
         # opened by someone else and confuse the audit trail. Reject.
         raise HTTPException(status_code=403, detail="Mutation batch belongs to another user")
-    if batch.confirm_token and not verify_confirm_token(batch, body.confirm_token or ""):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Missing or invalid confirm_token. Re-run the dry-run to obtain a "
-                "fresh token (tokens expire 15 minutes after issue)."
-            ),
-        )
     await commit_batch(db, batch, summary=body.summary)
     await db.commit()
     return MutationBatchOut(**batch_to_dict(batch, actor_display_name=user.display_name))

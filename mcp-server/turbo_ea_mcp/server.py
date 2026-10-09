@@ -25,7 +25,11 @@ from starlette.routing import Route
 
 from turbo_ea_mcp import oauth
 from turbo_ea_mcp.api_client import CARD_IDS_CHUNK, TurboEAClient, chunked
-from turbo_ea_mcp.batches import mutation_batch
+from turbo_ea_mcp.batches import (
+    BatchCloseError,
+    ConfirmationRejected,
+    mutation_batch,
+)
 from turbo_ea_mcp.config import (
     APP_VERSION,
     MCP_ALLOW_RELATION_DELETE,
@@ -1802,6 +1806,70 @@ def _confirmation_required_message(tool: str, row_count: int) -> str | None:
     )
 
 
+def _needs_confirmation(row_count: int) -> bool:
+    """Whether a call of this size must be previewed and confirmed under
+    this server's settings. Sent to the backend with every batch so both
+    sides apply the same rule."""
+    return MCP_REQUIRE_DRYRUN_FIRST and row_count > MCP_BATCH_CONFIRMATION_THRESHOLD
+
+
+async def _preview_confirmation(
+    token: str, tool: str, row_count: int, payload: object
+) -> dict:
+    """Record a dry-run batch for a tool whose preview makes no backend
+    write call of its own, and return the fields to add to its response:
+    ``batch_id`` and, when the call needs confirming, ``confirm_token``.
+    Without this such a tool had no way to obtain the token its commit
+    demands."""
+    if not _needs_confirmation(row_count):
+        return {}
+    async with mutation_batch(
+        token,
+        tool_name=tool,
+        row_count=row_count,
+        dry_run=True,
+        payload=payload,
+        require_confirmation=True,
+    ) as batch:
+        batch.summary = {"rows": row_count}
+        return {"batch_id": batch.batch_id, **batch.confirmation_fields()}
+
+
+# Fields a row of ``update_cards_bulk`` may set — ``CardUpdate`` in the backend,
+# which silently drops anything else. A misspelt field would otherwise come
+# back as "unchanged".
+_CARD_UPDATE_FIELDS = frozenset(
+    {
+        "name",
+        "subtype",
+        "description",
+        "parent_id",
+        "parent_label",
+        "lifecycle",
+        "lifecycle_stage",
+        "attributes",
+        "status",
+        "external_id",
+        "alias",
+    }
+)
+
+
+async def _batch_change_count(token: str, batch_id: str | None) -> int | None:
+    """How many change events a batch recorded, or ``None`` if that cannot
+    be read. Events are written in the same transaction as the cards, so
+    this settles whether a write whose response was lost took effect."""
+    if not batch_id:
+        return None
+    try:
+        history = await TurboEAClient(token).get(f"/mutation-batches/{batch_id}/events")
+    except Exception:  # noqa: BLE001 — the caller reports "unknown"
+        return None
+    if not isinstance(history, dict):
+        return None
+    return len(history.get("events") or [])
+
+
 @mcp.tool(annotations=_WRITE_ADDITIVE_ANNOT)
 async def update_cards_bulk(
     updates: list[dict],
@@ -1809,19 +1877,19 @@ async def update_cards_bulk(
     dry_run: bool = True,
     confirm_token: str = "",
 ) -> str:
-    """Update many cards in one call. Field-level patches with a per-row
-    before/after diff returned on dry-run.
+    """Update many cards in one call, each with its own field-level patch.
 
-    The backend uses the existing ``PATCH /cards/bulk`` endpoint with
-    the new ``dry_run`` flag; updates apply transactionally — either
-    every row succeeds or the batch rolls back.
+    All-or-nothing: every row is validated first and the cards are written
+    in one transaction (``PATCH /cards/bulk-rows``). If any row is rejected,
+    nothing is written and each row says why or that it was not applied.
 
     Args:
         updates: List of update dicts. Each dict carries:
-            - ``card_id`` (UUID string, required).
+            - ``card_id`` (UUID string, required). A card may appear once.
             - One or more of ``name``, ``subtype``, ``description``,
-              ``parent_id``, ``lifecycle``, ``lifecycle_stage``,
-              ``attributes``, ``status``, ``external_id``, ``alias``.
+              ``parent_id``, ``parent_label``, ``lifecycle``,
+              ``lifecycle_stage``, ``attributes``, ``status``,
+              ``external_id``, ``alias``. Any other key is rejected.
               ``lifecycle_stage`` is the explicit current stage (a key of
               the card type's ``lifecycle_stages``), recorded without a date.
             ``attributes`` is a *full replace* — supply the complete
@@ -1829,18 +1897,34 @@ async def update_cards_bulk(
             (Backend preserves cost-typed keys the caller can't see.)
         strict_attributes: When True, reject ``attributes`` keys that
             are not declared in the card type's ``fields_schema``. The
-            422 lists the unknown keys and the valid key set so an LLM
-            that hallucinated a field name can recover. Recommended
+            row's error lists the unknown keys and the valid key set so an
+            LLM that hallucinated a field name can recover. Recommended
             for AI-agent writes (S5).
         dry_run: When True (default), return the per-row diff without
-            persisting. The backend uses the same savepoint pattern as
-            ``create_cards_bulk``.
-        confirm_token: Echoed back on commits above the per-call
-            confirmation threshold (see ``create_cards_bulk``).
+            persisting anything.
+        confirm_token: Required on a commit above the per-call
+            confirmation threshold (default 20 rows): the ``confirm_token``
+            the dry-run of the *same* ``updates`` and ``strict_attributes``
+            returned. It expires 15 minutes after that dry-run, works once,
+            and is only valid for the user who ran the dry-run.
 
-    Returns: JSON with ``results[]`` (one ``{row_index, card_id,
-    status, before, after}`` per changed card), ``would_update`` or
-    ``updated`` count, ``dry_run``, and ``batch_id``.
+    Returns: JSON with
+        - ``results[]``: exactly one entry per input row, in input order —
+          ``{row_index, card_id, status, before, after, error}``.
+          ``row_index`` is the row's position in ``updates``. ``status`` is
+          ``would_update`` / ``unchanged`` / ``error`` on a dry-run,
+          ``updated`` / ``unchanged`` on a commit, and ``error`` /
+          ``not_applied`` on a commit that was refused. ``before`` /
+          ``after`` hold only the fields that differ.
+        - ``total``, ``would_update``, ``updated``, ``unchanged``,
+          ``failed``, ``not_applied``: counts of ``results`` by status;
+          ``total`` is their sum and equals ``len(updates)``.
+        - ``dry_run``, ``committed`` (whether anything was written),
+          ``batch_id``, ``error`` (why a commit was refused).
+        - ``confirm_token`` and ``confirm_token_expires_at``: on a dry-run
+          above the threshold with no failed row.
+        - ``audit_warning``: only if the audit batch could not be closed;
+          it states whether data changed.
     """
     token = await _get_current_token()
     if not token:
@@ -1864,75 +1948,153 @@ async def update_cards_bulk(
         if gate is not None and not confirm_token:
             return gate
 
-    # The backend `PATCH /cards/bulk` endpoint takes one shared
-    # ``updates`` dict applied across every id. To support per-row
-    # patches the MCP tool batches together rows that share the same
-    # patch and dispatches them as separate sub-calls inside the
-    # mutation batch — the audit trail still ties them all to a single
-    # batch id.
-    def _key(u: dict) -> tuple:
-        return tuple(sorted((k, repr(v)) for k, v in u.items() if k != "card_id"))
-
-    by_patch: dict = {}
-    for u in updates:
-        if "card_id" not in u:
+    # Refuse a malformed call before a batch is opened: nothing is previewed
+    # or written, and every offending row is named by its position.
+    rows_by_card: dict[str, list[int]] = {}
+    unknown_fields: list[dict] = []
+    for index, u in enumerate(updates):
+        if not isinstance(u, dict) or not u.get("card_id"):
             return _fmt(
                 {
                     "error": "missing_card_id",
                     "message": "Every row in updates[] must include card_id.",
+                    "row_index": index,
                     "row": u,
                 }
             )
-        by_patch.setdefault(
-            _key(u),
-            {"ids": [], "patch": {k: v for k, v in u.items() if k != "card_id"}},
-        )
-        by_patch[_key(u)]["ids"].append(u["card_id"])
-
-    async with mutation_batch(
-        token,
-        tool_name="update_cards_bulk",
-        row_count=len(updates),
-        dry_run=dry_run,
-        confirm_token=confirm_token or None,
-    ) as batch:
-        client = batch.client()
-        aggregated_results: list[dict] = []
-        any_actual: dict | None = None
-        for group in by_patch.values():
-            patch = dict(group["patch"])
-            if strict_attributes:
-                patch["strict_attributes"] = True
-            resp = await client.patch(
-                "/cards/bulk",
-                json={"ids": group["ids"], "updates": patch, "dry_run": dry_run},
+        rows_by_card.setdefault(str(u["card_id"]).lower(), []).append(index)
+        extra = sorted(set(u) - _CARD_UPDATE_FIELDS - {"card_id"})
+        if extra:
+            unknown_fields.append(
+                {"row_index": index, "card_id": u["card_id"], "fields": extra}
             )
-            if isinstance(resp, dict) and dry_run:
-                aggregated_results.extend(resp.get("results", []))
+    if unknown_fields:
+        return _fmt(
+            {
+                "error": "unknown_fields",
+                "message": "Some rows set fields a card update does not have.",
+                "rows": unknown_fields,
+                "allowed_fields": sorted(_CARD_UPDATE_FIELDS),
+            }
+        )
+    duplicates = [
+        {"card_id": updates[indexes[0]]["card_id"], "row_indexes": indexes}
+        for indexes in rows_by_card.values()
+        if len(indexes) > 1
+    ]
+    if duplicates:
+        return _fmt(
+            {
+                "error": "duplicate_card_id",
+                "message": (
+                    "A card may appear in updates[] once: two rows for one card "
+                    "have no defined order. Merge them into one row."
+                ),
+                "duplicates": duplicates,
+            }
+        )
+
+    body = {
+        "rows": [
+            {
+                "card_id": u["card_id"],
+                "updates": {k: v for k, v in u.items() if k != "card_id"},
+            }
+            for u in updates
+        ],
+        "strict_attributes": strict_attributes,
+        "dry_run": dry_run,
+    }
+    data: dict = {}
+    try:
+        async with mutation_batch(
+            token,
+            tool_name="update_cards_bulk",
+            row_count=len(updates),
+            dry_run=dry_run,
+            confirm_token=confirm_token or None,
+            payload={"updates": updates, "strict_attributes": strict_attributes},
+            require_confirmation=_needs_confirmation(len(updates)),
+        ) as batch:
+            try:
+                resp = await batch.client().patch("/cards/bulk-rows", json=body)
+            except Exception as exc:
+                if dry_run:
+                    raise
+                # A 4xx is the backend refusing before its single commit. A
+                # lost or 5xx response says nothing, so ask the audit trail.
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                refused = status is not None and 400 <= status < 500
+                changes = 0 if refused else await _batch_change_count(token, batch.batch_id)
+                committed = None if changes is None else changes > 0
+                data = {
+                    "dry_run": False,
+                    "committed": committed,
+                    "batch_id": batch.batch_id,
+                    "error": str(exc),
+                    "message": (
+                        "The write could not be confirmed and the audit trail could "
+                        "not be read. Read the cards back before retrying."
+                        if committed is None
+                        else (
+                            f"The backend reported an error but batch {batch.batch_id} "
+                            f"recorded {changes} change(s): the write took effect."
+                            if committed
+                            else "Nothing was written."
+                        )
+                    ),
+                }
+                batch.summary = {
+                    "rows": len(updates),
+                    "status": "committed" if committed else "failed",
+                    "outcome_verified": committed is not None,
+                    "error": str(exc),
+                }
             else:
-                any_actual = resp
-        if dry_run:
-            data: dict = {
-                "dry_run": True,
-                "results": aggregated_results,
-                "would_update": len(aggregated_results),
-                "batch_id": batch.batch_id,
-            }
-            if batch.confirm_token_issued:
-                data["confirm_token"] = batch.confirm_token_issued
-            batch.summary = {
-                "rows": len(updates),
-                "would_update": len(aggregated_results),
-            }
-        else:
-            data = {
-                "dry_run": False,
-                "updated": len(updates),
-                "batch_id": batch.batch_id,
-                "result": any_actual,
-            }
-            batch.summary = {"rows": len(updates), "updated": len(updates)}
-        return _fmt(data)
+                data = {
+                    "dry_run": dry_run,
+                    "committed": bool(resp.get("committed")),
+                    "batch_id": batch.batch_id,
+                    **{
+                        key: resp.get(key, 0)
+                        for key in (
+                            "total",
+                            "would_update",
+                            "updated",
+                            "unchanged",
+                            "failed",
+                            "not_applied",
+                        )
+                    },
+                    "results": resp.get("results", []),
+                }
+                if resp.get("error"):
+                    data["error"] = resp["error"]
+                clean = not data["failed"]
+                if dry_run and clean:
+                    data.update(batch.confirmation_fields())
+                elif dry_run and batch.confirm_token_issued:
+                    data["message"] = (
+                        "No confirm_token was issued because some rows failed. "
+                        "Fix them and run the dry-run again."
+                    )
+                batch.summary = {
+                    "rows": len(updates),
+                    "status": (
+                        ("previewed" if clean else "failed")
+                        if dry_run
+                        else ("committed" if data["committed"] else "failed")
+                    ),
+                    **{
+                        key: data[key]
+                        for key in ("would_update", "updated", "unchanged", "failed")
+                    },
+                }
+    except ConfirmationRejected as exc:
+        return _fmt(exc.as_dict("update_cards_bulk"))
+    except BatchCloseError as exc:
+        data["audit_warning"] = exc.as_dict()
+    return _fmt(data)
 
 
 # Mirrors ``ALLOWED_CARD_LOGO_MIMES`` / ``MAX_CARD_LOGO_SIZE`` and
@@ -2523,10 +2685,14 @@ async def set_card_logos(
         icon_check, prepared, unknown_rows = await _check_logo_icon_slugs(token, prepared)
         problems.extend(unknown_rows)
 
+    logo_payload = [
+        item.model_dump() if isinstance(item, CardLogoItem) else item for item in items
+    ]
     if dry_run:
         return _fmt(
             {
                 "dry_run": True,
+                **await _preview_confirmation(token, "set_card_logos", len(items), logo_payload),
                 "would_set": len(prepared),
                 "results": [
                     {
@@ -2551,68 +2717,75 @@ async def set_card_logos(
     if not prepared:
         return _fmt({"dry_run": False, "set": 0, "results": problems})
 
-    async with mutation_batch(
-        token,
-        tool_name="set_card_logos",
-        row_count=len(prepared),
-        dry_run=False,
-        confirm_token=confirm_token or None,
-    ) as batch:
-        client = batch.client()
-        results: list[dict] = list(problems)
-        succeeded = 0
-        for p in prepared:
-            # Per-row isolation: one card whose type has logos switched off,
-            # or that this user may not edit, must not abandon the rest.
-            try:
-                if p["icon_slug"]:
-                    resp = await client.post_multipart(
-                        f"/cards/{p['card_id']}/logo",
-                        data={"icon_slug": p["icon_slug"]},
+    data: dict = {}
+    try:
+        async with mutation_batch(
+            token,
+            tool_name="set_card_logos",
+            row_count=len(items),
+            dry_run=False,
+            confirm_token=confirm_token or None,
+            payload=logo_payload,
+            require_confirmation=_needs_confirmation(len(items)),
+        ) as batch:
+            client = batch.client()
+            results: list[dict] = list(problems)
+            succeeded = 0
+            for p in prepared:
+                # Per-row isolation: one card whose type has logos switched off,
+                # or that this user may not edit, must not abandon the rest.
+                try:
+                    if p["icon_slug"]:
+                        resp = await client.post_multipart(
+                            f"/cards/{p['card_id']}/logo",
+                            data={"icon_slug": p["icon_slug"]},
+                        )
+                    else:
+                        resp = await client.post_file(
+                            f"/cards/{p['card_id']}/logo",
+                            p["filename"],
+                            p["raw"],
+                            p["mime"],
+                        )
+                    succeeded += 1
+                    body = resp if isinstance(resp, dict) else {}
+                    results.append(
+                        {
+                            "row_index": p["row_index"],
+                            "card_id": p["card_id"],
+                            "status": "set",
+                            "mime": body.get("mime") or p["mime"],
+                            "bytes_received": len(p["raw"]) if p["raw"] is not None else None,
+                            "sha256_received": p.get("sha256"),
+                            # The server's digest of what it actually stored, so a
+                            # caller can prove the bytes that landed are its own —
+                            # including on the icon path, where it never held them.
+                            "sha256": body.get("sha256"),
+                            "icon_slug": body.get("icon_slug") or p["icon_slug"],
+                            "logo_updated_at": body.get("logo_updated_at"),
+                        }
                     )
-                else:
-                    resp = await client.post_file(
-                        f"/cards/{p['card_id']}/logo",
-                        p["filename"],
-                        p["raw"],
-                        p["mime"],
+                except Exception as exc:  # noqa: BLE001 — reported, never raised
+                    results.append(
+                        {
+                            "row_index": p["row_index"],
+                            "card_id": p["card_id"],
+                            **_logo_failure_fields(exc),
+                            "error": str(exc),
+                        }
                     )
-                succeeded += 1
-                body = resp if isinstance(resp, dict) else {}
-                results.append(
-                    {
-                        "row_index": p["row_index"],
-                        "card_id": p["card_id"],
-                        "status": "set",
-                        "mime": body.get("mime") or p["mime"],
-                        "bytes_received": len(p["raw"]) if p["raw"] is not None else None,
-                        "sha256_received": p.get("sha256"),
-                        # The server's digest of what it actually stored, so a
-                        # caller can prove the bytes that landed are its own —
-                        # including on the icon path, where it never held them.
-                        "sha256": body.get("sha256"),
-                        "icon_slug": body.get("icon_slug") or p["icon_slug"],
-                        "logo_updated_at": body.get("logo_updated_at"),
-                    }
-                )
-            except Exception as exc:  # noqa: BLE001 — reported, never raised
-                results.append(
-                    {
-                        "row_index": p["row_index"],
-                        "card_id": p["card_id"],
-                        **_logo_failure_fields(exc),
-                        "error": str(exc),
-                    }
-                )
-        batch.summary = {"rows": len(prepared), "set": succeeded}
-        return _fmt(
-            {
+            batch.summary = {"rows": len(prepared), "set": succeeded}
+            data = {
                 "dry_run": False,
                 "set": succeeded,
                 "batch_id": batch.batch_id,
                 "results": results,
             }
-        )
+    except ConfirmationRejected as exc:
+        return _fmt(exc.as_dict("set_card_logos"))
+    except BatchCloseError as exc:
+        data["audit_warning"] = exc.as_dict()
+    return _fmt(data)
 
 
 @mcp.tool(annotations=_READ_ANNOT)
@@ -2783,42 +2956,58 @@ async def clear_card_logos(
                 results.append({"card_id": cid, "status": "would_clear"})
             else:
                 results.append({"card_id": cid, "status": "no_logo"})
-        return _fmt({"dry_run": True, "would_clear": would, "results": results})
-
-    async with mutation_batch(
-        token,
-        tool_name="clear_card_logos",
-        row_count=len(card_ids),
-        dry_run=False,
-        confirm_token=confirm_token or None,
-    ) as batch:
-        client = batch.client()
-        results = []
-        cleared = 0
-        for cid in card_ids:
-            # Per-row isolation, as everywhere else: one card the caller may
-            # not edit must not abandon the rest.
-            try:
-                await client.delete(f"/cards/{cid}/logo")
-                cleared += 1
-                results.append({"card_id": cid, "status": "cleared"})
-            except Exception as exc:  # noqa: BLE001 — reported, never raised
-                msg = str(exc)
-                # A 404 here means "this card had no logo", which is the
-                # desired end state, not a failure to explain.
-                fields = (
-                    {"status": "no_logo"} if "404" in msg else _logo_failure_fields(exc)
-                )
-                results.append({"card_id": cid, **fields, "error": msg})
-        batch.summary = {"rows": len(card_ids), "cleared": cleared}
         return _fmt(
             {
+                "dry_run": True,
+                **await _preview_confirmation(
+                    token, "clear_card_logos", len(card_ids), card_ids
+                ),
+                "would_clear": would,
+                "results": results,
+            }
+        )
+
+    data: dict = {}
+    try:
+        async with mutation_batch(
+            token,
+            tool_name="clear_card_logos",
+            row_count=len(card_ids),
+            dry_run=False,
+            confirm_token=confirm_token or None,
+            payload=card_ids,
+            require_confirmation=_needs_confirmation(len(card_ids)),
+        ) as batch:
+            client = batch.client()
+            results = []
+            cleared = 0
+            for cid in card_ids:
+                # Per-row isolation, as everywhere else: one card the caller may
+                # not edit must not abandon the rest.
+                try:
+                    await client.delete(f"/cards/{cid}/logo")
+                    cleared += 1
+                    results.append({"card_id": cid, "status": "cleared"})
+                except Exception as exc:  # noqa: BLE001 — reported, never raised
+                    msg = str(exc)
+                    # A 404 here means "this card had no logo", which is the
+                    # desired end state, not a failure to explain.
+                    fields = (
+                        {"status": "no_logo"} if "404" in msg else _logo_failure_fields(exc)
+                    )
+                    results.append({"card_id": cid, **fields, "error": msg})
+            batch.summary = {"rows": len(card_ids), "cleared": cleared}
+            data = {
                 "dry_run": False,
                 "cleared": cleared,
                 "batch_id": batch.batch_id,
                 "results": results,
             }
-        )
+    except ConfirmationRejected as exc:
+        return _fmt(exc.as_dict("clear_card_logos"))
+    except BatchCloseError as exc:
+        data["audit_warning"] = exc.as_dict()
+    return _fmt(data)
 
 
 @mcp.tool(annotations=_WRITE_DESTRUCTIVE_ANNOT)
@@ -2889,43 +3078,50 @@ async def archive_cards(
     if reason:
         payload["reason"] = reason
 
-    async with mutation_batch(
-        token,
-        tool_name="archive_cards",
-        row_count=len(card_ids),
-        dry_run=dry_run,
-        confirm_token=confirm_token or None,
-    ) as batch:
-        client = batch.client()
-        if dry_run:
-            # The bulk-archive endpoint doesn't support a dry_run flag
-            # yet — instead we call the per-card archive-impact preview
-            # endpoint and aggregate the responses.
-            previews: list[dict] = []
-            for cid in card_ids:
-                imp = await TurboEAClient(token).get(f"/cards/{cid}/archive-impact")
-                previews.append({"card_id": cid, "impact": imp})
-            data = {
-                "dry_run": True,
-                "results": previews,
-                "would_archive": len(card_ids),
-                "would_send": payload,
-                "batch_id": batch.batch_id,
-            }
-            if batch.confirm_token_issued:
-                data["confirm_token"] = batch.confirm_token_issued
-            batch.summary = {"rows": len(card_ids), "dry_run": True}
-            return _fmt(data)
-
-        data = await client.post("/cards/bulk-archive", json=payload)
+    data: dict | list = {}
+    try:
+        async with mutation_batch(
+            token,
+            tool_name="archive_cards",
+            row_count=len(card_ids),
+            dry_run=dry_run,
+            confirm_token=confirm_token or None,
+            payload=payload,
+            require_confirmation=_needs_confirmation(len(card_ids)),
+        ) as batch:
+            client = batch.client()
+            if dry_run:
+                # The bulk-archive endpoint doesn't support a dry_run flag
+                # yet — instead we call the per-card archive-impact preview
+                # endpoint and aggregate the responses.
+                previews: list[dict] = []
+                for cid in card_ids:
+                    imp = await TurboEAClient(token).get(f"/cards/{cid}/archive-impact")
+                    previews.append({"card_id": cid, "impact": imp})
+                data = {
+                    "dry_run": True,
+                    "results": previews,
+                    "would_archive": len(card_ids),
+                    "would_send": payload,
+                    "batch_id": batch.batch_id,
+                    **batch.confirmation_fields(),
+                }
+                batch.summary = {"rows": len(card_ids), "dry_run": True}
+            else:
+                data = await client.post("/cards/bulk-archive", json=payload)
+                if isinstance(data, dict):
+                    data["batch_id"] = batch.batch_id
+                    batch.summary = {
+                        "rows": len(card_ids),
+                        "archived": len(data.get("archived_card_ids", [])),
+                        "cascaded": len(data.get("cascaded_card_ids", [])),
+                    }
+    except ConfirmationRejected as exc:
+        return _fmt(exc.as_dict("archive_cards"))
+    except BatchCloseError as exc:
         if isinstance(data, dict):
-            data["batch_id"] = batch.batch_id
-            batch.summary = {
-                "rows": len(card_ids),
-                "archived": len(data.get("archived_card_ids", [])),
-                "cascaded": len(data.get("cascaded_card_ids", [])),
-            }
-        return _fmt(data)
+            data["audit_warning"] = exc.as_dict()
+    return _fmt(data)
 
 
 # The backend stores ADR bodies in four fixed columns. MCP callers speak
@@ -3305,34 +3501,37 @@ async def create_cards_bulk(
         if gate is not None and not confirm_token:
             return gate
 
-    async with mutation_batch(
-        token,
-        tool_name="create_cards_bulk",
-        row_count=len(cards),
-        dry_run=dry_run,
-        confirm_token=confirm_token or None,
-    ) as batch:
-        # Surface a confirmation hint to the agent the *first* time we
-        # see a dry-run above threshold. The backend issued the token;
-        # we just propagate it.
-        if dry_run and batch.confirm_token_issued:
-            pass  # included in the response below
-
-        client = batch.client()
-        data = await client.post(
-            "/cards/bulk-create",
-            json={"cards": cards, "dry_run": dry_run},
-        )
+    data: dict | list = {}
+    try:
+        async with mutation_batch(
+            token,
+            tool_name="create_cards_bulk",
+            row_count=len(cards),
+            dry_run=dry_run,
+            confirm_token=confirm_token or None,
+            payload=cards,
+            require_confirmation=_needs_confirmation(len(cards)),
+        ) as batch:
+            client = batch.client()
+            data = await client.post(
+                "/cards/bulk-create",
+                json={"cards": cards, "dry_run": dry_run},
+            )
+            if isinstance(data, dict):
+                data["batch_id"] = batch.batch_id
+                if dry_run:
+                    data.update(batch.confirmation_fields())
+                batch.summary = {
+                    "rows": len(cards),
+                    "created": data.get("created"),
+                    "failed": data.get("failed"),
+                }
+    except ConfirmationRejected as exc:
+        return _fmt(exc.as_dict("create_cards_bulk"))
+    except BatchCloseError as exc:
         if isinstance(data, dict):
-            data["batch_id"] = batch.batch_id
-            if dry_run and batch.confirm_token_issued:
-                data["confirm_token"] = batch.confirm_token_issued
-            batch.summary = {
-                "rows": len(cards),
-                "created": data.get("created"),
-                "failed": data.get("failed"),
-            }
-        return _fmt(data)
+            data["audit_warning"] = exc.as_dict()
+    return _fmt(data)
 
 
 @mcp.tool(annotations=_READ_ANNOT)

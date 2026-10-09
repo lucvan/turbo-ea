@@ -82,23 +82,11 @@ def _route_writes_through_batch(
 
 class TestUpdateCardsBulk:
     @pytest.mark.asyncio
-    async def test_groups_by_patch_and_dispatches(self, fake_token):
+    async def test_rows_go_to_the_backend_in_one_call_in_input_order(self, fake_token):
+        """Rows used to be regrouped by patch and sent as one PATCH per
+        group: separate transactions, and results indexed per group."""
         post, patch_, get, calls = _route_writes_through_batch(
-            patch_responses={
-                "/cards/bulk": {
-                    "dry_run": True,
-                    "results": [
-                        {
-                            "row_index": 0,
-                            "card_id": "c1",
-                            "status": "would_update",
-                            "before": {"name": "Old"},
-                            "after": {"name": "New"},
-                        }
-                    ],
-                    "would_update": 1,
-                }
-            }
+            patch_responses={"/cards/bulk-rows": {"dry_run": True, "total": 3, "results": []}}
         )
         with (
             patch.object(server.TurboEAClient, "post", AsyncMock(side_effect=post)),
@@ -107,20 +95,32 @@ class TestUpdateCardsBulk:
             out = await server.update_cards_bulk(
                 updates=[
                     {"card_id": "c1", "name": "New"},
-                    {"card_id": "c2", "name": "New"},  # same patch → same group
-                    {"card_id": "c3", "description": "Hi"},  # different patch
+                    {"card_id": "c3", "description": "Hi"},
+                    {"card_id": "c2", "name": "New"},
                 ]
             )
         data = _parse(out)
         assert data["dry_run"] is True
         assert data["batch_id"] == "B-001"
-        # Two PATCH calls (two patch groups)
-        assert len(calls["patch"]) == 2
+        assert calls["patch"] == [
+            (
+                "/cards/bulk-rows",
+                {
+                    "rows": [
+                        {"card_id": "c1", "updates": {"name": "New"}},
+                        {"card_id": "c3", "updates": {"description": "Hi"}},
+                        {"card_id": "c2", "updates": {"name": "New"}},
+                    ],
+                    "strict_attributes": False,
+                    "dry_run": True,
+                },
+            )
+        ]
 
     @pytest.mark.asyncio
     async def test_strict_attributes_propagated(self, fake_token):
         post, patch_, get, calls = _route_writes_through_batch(
-            patch_responses={"/cards/bulk": {"dry_run": True, "results": []}}
+            patch_responses={"/cards/bulk-rows": {"dry_run": True, "results": []}}
         )
         with (
             patch.object(server.TurboEAClient, "post", AsyncMock(side_effect=post)),
@@ -130,11 +130,10 @@ class TestUpdateCardsBulk:
                 updates=[{"card_id": "c1", "attributes": {"k": "v"}}],
                 strict_attributes=True,
             )
-        # Find the PATCH call and confirm strict_attributes landed in the
-        # patch payload (alongside the actual fields).
         path, body = calls["patch"][0]
-        assert path == "/cards/bulk"
-        assert body["updates"]["strict_attributes"] is True
+        assert path == "/cards/bulk-rows"
+        assert body["strict_attributes"] is True
+        assert body["rows"] == [{"card_id": "c1", "updates": {"attributes": {"k": "v"}}}]
 
     @pytest.mark.asyncio
     async def test_missing_card_id_rejected(self, fake_token):

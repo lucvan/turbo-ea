@@ -12,12 +12,22 @@ class MutationBatchOpen(BaseModel):
 
     tool_name: str = Field(..., min_length=1, max_length=100)
     dry_run: bool = False
+    # Digest of the operation the caller previews or commits. A confirm token
+    # is bound to it, so a token issued for one payload cannot commit another.
+    payload_hash: str | None = Field(default=None, min_length=16, max_length=128)
+    # The caller's own decision on whether this row count needs a previewed
+    # confirm token. Left out, the backend applies its own threshold.
+    require_confirmation: bool | None = None
+    # On a write batch: the token the matching dry-run was issued. It is
+    # checked and spent here, before the caller writes anything.
+    confirm_token: str | None = Field(default=None, max_length=64)
 
 
 class MutationBatchCommit(BaseModel):
     """Close a batch after the wrapper's underlying writes complete."""
 
     summary: dict[str, Any] | None = None
+    # Accepted and ignored: the token is checked when the write batch opens.
     confirm_token: str | None = Field(default=None, max_length=64)
 
 
@@ -29,6 +39,7 @@ class MutationBatchOut(BaseModel):
     origin: str
     dry_run: bool
     confirm_token: str | None = None
+    confirm_token_expires_at: datetime | None = None
     summary: dict[str, Any] | None = None
     created_at: datetime
     committed_at: datetime | None
