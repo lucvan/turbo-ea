@@ -677,6 +677,14 @@ sanitises last so stored and generated anchors share one policy, stamps `target`
 every anchor whose href is `http`, `https` or `mailto`, and strips any other href. It runs on
 a private DOMPurify instance so the SVG-thumbnail sanitisers never inherit the hook.
 
+The **long fields of a card** — its description and its `multiline_text` attributes — are
+rendered as markdown through **`MarkdownText`** (`components/MarkdownText.tsx`, fork
+addition). It renders its own block (`<div>`), so a hosting `Typography` needs
+`component="div"`, and it inherits colour and font size. `renderMarkdown` (`lib/markdown.ts`)
+parses with typed HTML and images off and single line breaks kept, then passes the result
+through `sanitizeRichHtml`, so links follow the policy above. Everything else — short text,
+comments, todos, truncated previews, grid cells — stays on `LinkifiedText`.
+
 Detection in prose is **`http(s)://` only** — no bare `www.`, no bare e-mails — the same
 allowlist the `url` field type enforces, chosen for zero false positives. `mailto:` is
 accepted as an *href* (a `url`-typed value, a stored anchor) but never detected in text.
@@ -705,6 +713,7 @@ accepted as an *href* (a `url`-typed value, a stored anchor) but never detected 
 - [`src/theme/index.ts`](./src/theme/index.ts) — `buildTheme()` and re-exports
 - [`src/components/LinkifiedText.tsx`](./src/components/LinkifiedText.tsx) — free text with clickable addresses (§3.14)
 - [`src/lib/richHtml.ts`](./src/lib/richHtml.ts) — the one sanitiser for stored rich text (§3.14)
+- [`src/components/MarkdownText.tsx`](./src/components/MarkdownText.tsx) — a card's long text fields as markdown (§3.14)
 - [`src/components/MaterialSymbol.tsx`](./src/components/MaterialSymbol.tsx)
 - [`src/features/reports/MetricCard.tsx`](./src/features/reports/MetricCard.tsx)
 - [`src/features/reports/ReportShell.tsx`](./src/features/reports/ReportShell.tsx)
