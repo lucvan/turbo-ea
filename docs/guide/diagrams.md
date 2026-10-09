@@ -94,7 +94,7 @@ A floating legend in the bottom-left shows one scale per active rule. Field rule
 
 #### Show on card
 
-A second toolbar button, **Show on card**, chooses **what each shape says**. Tick the **card type**, the **subtype**, or any attribute from the card types currently on the canvas, and each shape gains small detail lines under its name. Fields are listed under the card type they belong to, with any field several of those types share grouped under **Shared**. It is a separate button from **Color by** so that neither list has to be scrolled past to reach the other. **Clear all** empties every tick at once.
+A second toolbar button, **Show on card**, chooses **what each shape says**. Tick the **card type**, the **subtype**, the **alias** (shown as an *Alias:* line, only on cards that have one), or any attribute from the card types currently on the canvas, and each shape gains small detail lines under its name. Fields are listed under the card type they belong to, with any field several of those types share grouped under **Shared**. It is a separate button from **Color by** so that neither list has to be scrolled past to reach the other. **Clear all** empties every tick at once.
 
 Every selection is drawn on the shape, and the shape **grows to hold it**. Two rows fit in a card as it stands, so nothing moves until you tick a third; from there each card gets a little taller per selection and shrinks back when you untick one. A card you have resized by hand keeps your height: it only gains or gives back the room a row needs.
 

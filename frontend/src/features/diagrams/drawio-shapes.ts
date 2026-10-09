@@ -336,6 +336,19 @@ const CARD_NAME_ATTR = "cardName";
  */
 const CARD_DETAIL_ATTR = "cardDetail";
 
+/**
+ * XML attribute holding the description typed in the editor's Create-card
+ * dialog, on a **pending** cell only.
+ *
+ * A pending card has no inventory record yet, so the cell is the only place
+ * the text can wait until Sync posts it (#1210 — it used to be dropped on the
+ * way from the dialog to `POST /cards`). It is never folded into the label,
+ * which stays the bare name `scanDiagramItems` feeds to the POST; it is
+ * removed by `markCellSynced` once the card exists, and the public publisher
+ * strips it like every other card stamp.
+ */
+const CARD_DESCRIPTION_ATTR = "cardDescription";
+
 /** Escape a string for safe inclusion in an HTML label. Card names and
  *  attribute values are user data and must never be able to inject markup
  *  into the DrawIO iframe. */
@@ -894,6 +907,8 @@ export function insertPendingCard(
     tempId: string;
     type: string;
     name: string;
+    /** The description typed alongside the name; waits on the cell until Sync. */
+    description?: string;
     color: string;
     icon?: string;
     x: number;
@@ -916,6 +931,7 @@ export function insertPendingCard(
   obj.setAttribute("cardId", opts.tempId);
   obj.setAttribute("cardType", opts.type);
   obj.setAttribute("pending", "1");
+  setPendingDescription(obj, opts.description);
 
   model.beginUpdate();
   try {
@@ -983,6 +999,12 @@ export function stampEdgeAsRelation(
   return true;
 }
 
+/** Stamp the Create-card description on a pending cell; nothing when empty. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function setPendingDescription(obj: any, description: string | undefined): void {
+  if (description) obj.setAttribute(CARD_DESCRIPTION_ATTR, description);
+}
+
 /**
  * Mark a pending cell as synced: update its cardId to the real one
  * and switch from dashed to solid style.
@@ -1006,7 +1028,12 @@ export function markCellSynced(
     const obj = cell.value;
     if (obj?.setAttribute) {
       obj.setAttribute("cardId", realCardId);
-      if (obj.removeAttribute) obj.removeAttribute("pending");
+      if (obj.removeAttribute) {
+        obj.removeAttribute("pending");
+        // The card now owns its description; the cell must not keep a copy
+        // that would go stale, or ride into a saved diagram.
+        obj.removeAttribute(CARD_DESCRIPTION_ATTR);
+      }
     }
     // Carry the pending cell's icon tokens across the dashed→solid restyle.
     const carried = iconTokensFromStyle((model.getStyle(cell) || "") as string);
@@ -1109,6 +1136,8 @@ export interface ScannedPendingFS {
   tempId: string;
   type: string;
   name: string;
+  /** The description typed in the Create-card dialog, when one was (#1210). */
+  description?: string;
 }
 
 export interface ScannedPendingRel {
@@ -1184,6 +1213,7 @@ export function scanDiagramItems(iframe: HTMLIFrameElement): {
         tempId: fsId,
         type: cell.value.getAttribute("cardType") || "",
         name: readCardName(cell.value),
+        description: cell.value.getAttribute(CARD_DESCRIPTION_ATTR) || undefined,
       });
     } else if (fsId && !isPending) {
       // Synced card vertex — top-level or expanded-group child
@@ -3117,7 +3147,14 @@ export function getCellLabel(iframe: HTMLIFrameElement, cellId: string): string 
 export function convertShapeToPendingCard(
   iframe: HTMLIFrameElement,
   cellId: string,
-  opts: { tempId: string; type: string; name: string; color: string; icon?: string },
+  opts: {
+    tempId: string;
+    type: string;
+    name: string;
+    description?: string;
+    color: string;
+    icon?: string;
+  },
 ): boolean {
   const ctx = getMxGraph(iframe);
   if (!ctx) return false;
@@ -3135,6 +3172,7 @@ export function convertShapeToPendingCard(
     obj.setAttribute("cardId", opts.tempId);
     obj.setAttribute("cardType", opts.type);
     obj.setAttribute("pending", "1");
+    setPendingDescription(obj, opts.description);
     model.setValue(cell, obj);
     model.setStyle(cell, buildPendingStyle(opts.color, opts.icon));
     graph.refresh(cell);

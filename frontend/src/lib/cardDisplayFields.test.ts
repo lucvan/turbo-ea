@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  aliasLine,
   buildFieldCatalog,
   groupFieldCatalog,
   formatFieldValue,
@@ -168,6 +169,30 @@ describe("hasCardLabelLines", () => {
     expect(hasCardLabelLines({ fields: [], showType: true })).toBe(true);
     expect(hasCardLabelLines({ fields: [], showSubtype: true })).toBe(true);
     expect(hasCardLabelLines({ fields: ["owner"] })).toBe(true);
+  });
+
+  it("counts the alias row, so an alias-only selection still runs the display pass", () => {
+    expect(hasCardLabelLines({ fields: [], showAlias: true })).toBe(true);
+    expect(hasCardLabelLines({ fields: [], showAlias: false })).toBe(false);
+  });
+});
+
+describe("aliasLine", () => {
+  it("returns a labelled row for a card with an alias", () => {
+    expect(aliasLine("CRM-v2", "Alias")).toEqual({ label: "Alias", value: "CRM-v2" });
+  });
+
+  it("trims the alias", () => {
+    expect(aliasLine("  CRM-v2 ", "Alias")).toEqual({ label: "Alias", value: "CRM-v2" });
+  });
+
+  it("returns null for a card with nothing to show", () => {
+    // Both surfaces skip the row rather than print "Alias: —"; a card without
+    // an alias must look exactly as it always did.
+    expect(aliasLine(null, "Alias")).toBeNull();
+    expect(aliasLine(undefined, "Alias")).toBeNull();
+    expect(aliasLine("", "Alias")).toBeNull();
+    expect(aliasLine("   ", "Alias")).toBeNull();
   });
 });
 

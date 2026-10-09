@@ -235,6 +235,35 @@ describe("insertPendingCard / markCellSynced", () => {
     expect(insertPendingCard(NO_GRAPH, opts)).toBeNull();
   });
 
+  it("stores the dialog's description on the cell, leaving the label and cardName alone (#1210)", () => {
+    // The description has nowhere else to wait until Sync: a pending card has
+    // no inventory record yet. It must never reach the label, which is what
+    // `scanDiagramItems` feeds to `POST /cards` as the name.
+    const f = fakeIframe();
+    const cellId = insertPendingCard(f.iframe, { ...opts, description: "Draft notes" })!;
+    const cell = f.model.getCell(cellId)!;
+    expect(cell.value.getAttribute("cardDescription")).toBe("Draft notes");
+    expect(cell.value.getAttribute("label")).toBe("Draft");
+    expect(cell.value.getAttribute("cardName")).toBe("Draft");
+  });
+
+  it("writes no description attribute when the dialog left it empty", () => {
+    const f = fakeIframe();
+    const bare = f.model.getCell(insertPendingCard(f.iframe, opts)!)!;
+    expect(bare.value.getAttribute("cardDescription")).toBeNull();
+    const blank = f.model.getCell(insertPendingCard(f.iframe, { ...opts, description: "" })!)!;
+    expect(blank.value.getAttribute("cardDescription")).toBeNull();
+  });
+
+  it("markCellSynced drops the description once the card owns it", () => {
+    const f = fakeIframe();
+    const cellId = insertPendingCard(f.iframe, { ...opts, description: "Draft notes" })!;
+    const cell = f.model.getCell(cellId)!;
+    expect(markCellSynced(f.iframe, cellId, "real-id", "#ff0000")).toBe(true);
+    expect(cell.value.getAttribute("cardDescription")).toBeNull();
+    expect(cell.value.getAttribute("cardId")).toBe("real-id");
+  });
+
   it("markCellSynced swaps the id, drops the pending flag and keeps the icon tokens across the restyle", () => {
     const f = fakeIframe();
     const cellId = insertPendingCard(f.iframe, opts)!;
@@ -274,6 +303,23 @@ describe("updateCellLabel", () => {
     expect(c.value.getAttribute("cardName")).toBe("New");
     expect(c.value.getAttribute("label")).toBe(composeCardLabel("New", rows));
     expect(f.graph.refreshed).toEqual([c]);
+  });
+
+  it("renaming a pending card keeps the description waiting on it", () => {
+    const c = plainCell("p", {
+      value: attrBag({
+        cardId: "pending-1",
+        pending: "1",
+        cardType: "Application",
+        cardName: "Old",
+        label: "Old",
+        cardDescription: "keep me",
+      }),
+    });
+    const f = fakeIframe({ cells: [c] });
+    expect(updateCellLabel(f.iframe, "p", "New")).toBe(true);
+    expect(c.value.getAttribute("cardName")).toBe("New");
+    expect(c.value.getAttribute("cardDescription")).toBe("keep me");
   });
 
   it("leaves a string-valued shape alone but still refreshes it", () => {
@@ -383,6 +429,20 @@ describe("relinkCell / classifyCell / getCellLabel / convertShapeToPendingCard",
     expect(f.graph.refreshed).toEqual([c]);
     expect(convertShapeToPendingCard(f.iframe, "nope", { tempId: "t", type: "T", name: "N", color: "#000" })).toBe(false);
     expect(convertShapeToPendingCard(NO_GRAPH, "p", { tempId: "t", type: "T", name: "N", color: "#000" })).toBe(false);
+  });
+
+  it("convertShapeToPendingCard carries the description onto the converted shape (#1210)", () => {
+    const c = plainCell("p", { label: "box" });
+    const f = fakeIframe({ cells: [c] });
+    const base = { tempId: "pending-9", type: "Application", name: "Box", color: "#0f7eb5" };
+    expect(convertShapeToPendingCard(f.iframe, "p", { ...base, description: "Converted" })).toBe(true);
+    expect(c.value.getAttribute("cardDescription")).toBe("Converted");
+    expect(c.value.getAttribute("label")).toBe("Box");
+    // A conversion without one writes no attribute at all.
+    const d = plainCell("q", { label: "box" });
+    const g = fakeIframe({ cells: [d] });
+    expect(convertShapeToPendingCard(g.iframe, "q", base)).toBe(true);
+    expect(d.value.getAttribute("cardDescription")).toBeNull();
   });
 });
 

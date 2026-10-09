@@ -43,6 +43,7 @@ export default function LdvShowOnCard({
     update({
       showType: !!next.showType,
       showSubtype: !!next.showSubtype,
+      showAlias: !!next.showAlias,
       extraFields: next.fields,
     });
 

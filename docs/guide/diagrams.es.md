@@ -94,7 +94,7 @@ Una leyenda flotante en la esquina inferior izquierda muestra una escala por reg
 
 #### Mostrar en la tarjeta
 
-Un segundo botón de la barra de herramientas, **Mostrar en la tarjeta**, decide **qué dice cada forma**. Marque el **tipo de tarjeta**, el **subtipo** o cualquier atributo de los tipos de tarjeta presentes en el lienzo, y cada forma añadirá pequeñas líneas de detalle bajo su nombre. Los campos se listan bajo el tipo de tarjeta al que pertenecen; un campo compartido por varios de esos tipos se agrupa bajo **Comunes**. Es un botón aparte de **Colorear por**, para que ninguna de las dos listas obligue a recorrer la otra. **Borrar todo** desmarca todas las casillas de una vez.
+Un segundo botón de la barra de herramientas, **Mostrar en la tarjeta**, decide **qué dice cada forma**. Marque el **tipo de tarjeta**, el **subtipo**, el **alias** (mostrado como una línea *Alias:*, solo en las tarjetas que lo tienen) o cualquier atributo de los tipos de tarjeta presentes en el lienzo, y cada forma añadirá pequeñas líneas de detalle bajo su nombre. Los campos se listan bajo el tipo de tarjeta al que pertenecen; un campo compartido por varios de esos tipos se agrupa bajo **Comunes**. Es un botón aparte de **Colorear por**, para que ninguna de las dos listas obligue a recorrer la otra. **Borrar todo** desmarca todas las casillas de una vez.
 
 Cada selección se dibuja en la forma, y la forma **crece para acogerla**. Dos líneas ya caben en una tarjeta, así que nada se mueve hasta que marca una tercera; a partir de ahí cada tarjeta se hace un poco más alta por selección y vuelve a encogerse al desmarcar una. Una tarjeta que haya redimensionado a mano conserva su altura: solo gana o devuelve el espacio de una línea.
 

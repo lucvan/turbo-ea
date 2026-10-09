@@ -42,6 +42,11 @@ CARD_XML = (
     'vertex="1" parent="1"/></object>'
     '<object label="" relationId="22222222-2222-2222-2222-222222222222" '
     'relationType="app_to_itc"><mxCell edge="1" parent="1"/></object>'
+    # A card created on the canvas and not yet pushed to the inventory: the
+    # description typed in the Create-card dialog rides on the cell until Sync.
+    '<object label="Draft App" cardName="Draft App" cardId="pending-abc" '
+    'cardType="Application" pending="1" '
+    'cardDescription="Confidential draft notes"><mxCell vertex="1" parent="1"/></object>'
     "</root></mxGraphModel>"
 )
 
@@ -100,8 +105,18 @@ class TestSanitiser:
             "relationId=",
             "relationType=",
             "parentGroupCell=",
+            "cardDescription=",
         ):
             assert attr not in out, f"{attr} survived sanitisation"
+
+    def test_strips_a_pending_cards_description(self):
+        """A diagram saved with a card still pending carries the description
+        typed in the Create-card dialog as cell data (#1210). It is not part
+        of the picture, so it goes the way of `cardName`; the shape's own
+        label stays."""
+        out = sanitise_public_xml(CARD_XML)
+        assert "Confidential draft notes" not in out
+        assert "Draft App" in out
 
     def test_keeps_the_picture_intact(self):
         """Labels, geometry and styling are the whole point of publishing."""

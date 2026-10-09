@@ -103,6 +103,38 @@ describe("ShowOnCardSelector", () => {
     expect(onChange).toHaveBeenCalledWith({ fields: [], showType: true });
   });
 
+  it("offers the alias as a fixed row and toggles it (#1211)", async () => {
+    // The alias is a card column, not an attribute, so the field catalogue
+    // never lists it — it needs a row of its own like type and subtype.
+    const { onChange } = setup();
+    const menu = await openMenu();
+    await userEvent.click(within(menu).getByText("Alias"));
+    expect(onChange).toHaveBeenCalledWith({ fields: [], showAlias: true });
+  });
+
+  it("un-ticks an alias row that is on", async () => {
+    const { onChange } = setup({ fields: [], showAlias: true });
+    const menu = await openMenu();
+    await userEvent.click(within(menu).getByText("Alias"));
+    expect(onChange).toHaveBeenCalledWith({ fields: [], showAlias: false });
+  });
+
+  it("lists the alias row after Subtype and before the field groups", async () => {
+    setup();
+    const menu = await openMenu();
+    const names = within(menu)
+      .getAllByRole("menuitem")
+      .map((el) => el.textContent?.trim());
+    const subtypeAt = names.indexOf("Subtype");
+    expect(subtypeAt).toBeGreaterThan(-1);
+    expect(names[subtypeAt + 1]).toBe("Alias");
+  });
+
+  it("counts the alias row on the button", () => {
+    setup({ fields: [], showAlias: true });
+    expect(screen.getByRole("button")).toHaveTextContent("(1)");
+  });
+
   it("re-scans the canvas every time the menu opens, and stays open", async () => {
     const { onOpen } = setup();
     const menu = await openMenu();
@@ -182,7 +214,12 @@ describe("ShowOnCardSelector", () => {
   });
 
   it("clears every tick the shared settings own in one update", async () => {
-    const { onChange } = setup({ fields: ["owner", "hosting"], showType: true, showSubtype: true });
+    const { onChange } = setup({
+      fields: ["owner", "hosting"],
+      showType: true,
+      showSubtype: true,
+      showAlias: true,
+    });
     const menu = await openMenu();
     await userEvent.click(within(menu).getByRole("button", { name: "Clear all" }));
     // One call, not one per tick — the store takes a single write and the
@@ -192,6 +229,7 @@ describe("ShowOnCardSelector", () => {
       fields: [],
       showType: false,
       showSubtype: false,
+      showAlias: false,
     });
   });
 
