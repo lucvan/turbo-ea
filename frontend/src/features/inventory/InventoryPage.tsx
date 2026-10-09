@@ -32,7 +32,8 @@ import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { useTheme, darken, lighten, type Theme } from "@mui/material/styles";
 import MaterialSymbol from "@/components/MaterialSymbol";
-import LifecycleBadge, { getCurrentPhase } from "@/components/LifecycleBadge";
+import LifecycleBadge from "@/components/LifecycleBadge";
+import { useLifecycleStages } from "@/hooks/useLifecycleStages";
 import ArchiveDeleteDialog from "@/features/cards/ArchiveDeleteDialog";
 import BulkRestoreDialog from "@/features/cards/BulkRestoreDialog";
 import CreateCardDialog from "@/components/CreateCardDialog";
@@ -203,18 +204,6 @@ function stakeholdersToEmails(refs?: StakeholderRef[]): string {
     .join("; ");
 }
 
-/** The phase a card is currently in, as a key ("active", "plan", …), or "".
- *
- * Delegates to `getCurrentPhase` — the very function `LifecycleBadge` renders
- * from — so the sidebar's Lifecycle filter, the grid's Lifecycle column and the
- * badge in that column can never disagree. There used to be two hand-rolled
- * copies of the phase walk here (this one and an inline `valueGetter`), both
- * missing the badge's "a plan date in the future still counts as Plan" rule: a
- * card planned for next year showed a Plan chip but filtered as "(empty)" and
- * exported a blank cell. */
-function getLifecyclePhase(card: Card): string {
-  return getCurrentPhase(card.lifecycle as Record<string, string> | undefined) ?? "";
-}
 
 /**
  * Shared styling for the action buttons in the selection bar.
@@ -766,6 +755,11 @@ export default function InventoryPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { formatDate, formatDateTime } = useDateFormat();
   const { types, relationTypes } = useMetamodel();
+  // One resolver for the sidebar's Lifecycle filter, the grid's Lifecycle
+  // column, the group-by axis and the badge, so they can never disagree: the
+  // card's explicit stage when stated, else the stage its dates give, read
+  // against its own type's vocabulary. "" is unknown.
+  const { stageOf, stageLabel, customStages, stages: stagesFor } = useLifecycleStages();
   const typeLabel = useTypeLabel();
   const relLabel = useRelationLabel();
   const fieldLabel = useFieldLabel();
@@ -1324,8 +1318,16 @@ export default function InventoryPage() {
     axes.push({
       key: "lifecycle",
       label: t("columns.lifecycle"),
-      groupKeyOf: (c) => getLifecyclePhase(c),
-      vocab: LIFECYCLE_PHASES.map((p) => ({ key: p.key, label: t(p.tKey), color: p.color })),
+      groupKeyOf: (c) => stageOf(c),
+      // A type with its own stages groups by them, in its own order.
+      vocab:
+        typeConfig && customStages(typeConfig.key)
+          ? stagesFor(typeConfig.key).map((st) => ({
+              key: st.key,
+              label: stageLabel(typeConfig.key, st.key),
+              color: st.color,
+            }))
+          : LIFECYCLE_PHASES.map((p) => ({ key: p.key, label: t(p.tKey), color: p.color })),
     });
     axes.push({
       key: "approval_status",
@@ -1361,7 +1363,7 @@ export default function InventoryPage() {
       }
     }
     return axes;
-  }, [typeConfig, stLabel, optLabel, fieldLabel, t]);
+  }, [typeConfig, stLabel, optLabel, fieldLabel, t, stageOf, stageLabel, customStages, stagesFor]);
 
   // Load the selected type's stakeholder roles (per-role columns follow the
   // same single-type rule as attribute/relation columns).
@@ -1762,7 +1764,7 @@ export default function InventoryPage() {
 
     // Lifecycle filter ("(empty)" matches cards with no/unstarted lifecycle)
     if (filters.lifecyclePhases.length > 0) {
-      result = result.filter((card) => filters.lifecyclePhases.includes(getLifecyclePhase(card) || EMPTY_VALUE));
+      result = result.filter((card) => filters.lifecyclePhases.includes(stageOf(card) || EMPTY_VALUE));
     }
 
     // End-of-life filter. "(empty)" matches cards with nothing recorded —
@@ -1903,7 +1905,7 @@ export default function InventoryPage() {
     }
 
     return result;
-  }, [data, filters.types, filters.subtypes, filters.lifecyclePhases, filters.eolStatuses, eolOf, filters.linkTypes, filters.dataQualityBands, filters.attributes, filters.relations, filters.tagIds, relationsMap, relTypeGroupMap, relatedRefsOf, tagGroups]);
+  }, [data, stageOf, filters.types, filters.subtypes, filters.lifecyclePhases, filters.eolStatuses, eolOf, filters.linkTypes, filters.dataQualityBands, filters.attributes, filters.relations, filters.tagIds, relationsMap, relTypeGroupMap, relatedRefsOf, tagGroups]);
 
   // --- Grouped row data (shared hook — see components/grid/useRowGrouping) ---
   const grouping = useRowGrouping<Card>(gridRef, {
@@ -3166,15 +3168,18 @@ export default function InventoryPage() {
         hide: !selectedColumns.has("core_lifecycle"),
         // Same resolver the badge below renders from — the cell value, the sort
         // key and the exported text must agree with the chip the user sees.
-        valueGetter: (p: { data?: Card }) => (p.data ? getLifecyclePhase(p.data) : ""),
-        valueFormatter: (p: { value?: string }) =>
-          p.value ? t(`common:lifecycle.${p.value}`) : "",
+        valueGetter: (p: { data?: Card }) => (p.data ? stageOf(p.data) : ""),
+        valueFormatter: (p: { value?: string; data?: Card }) =>
+          p.value ? stageLabel(p.data?.type, p.value) : "",
         cellRenderer: (p: { data: Card }) => {
-          const lifecycle = p.data?.lifecycle as
-            | Record<string, string>
-            | undefined;
-          if (!lifecycle) return "";
-          return <LifecycleBadge lifecycle={lifecycle} />;
+          if (!p.data || !stageOf(p.data)) return "";
+          return (
+            <LifecycleBadge
+              lifecycle={p.data.lifecycle as Record<string, string> | undefined}
+              stage={p.data.lifecycle_stage}
+              stages={customStages(p.data.type)}
+            />
+          );
         },
       },
       // End of life. The value is the resolved date, so sorting and the
@@ -3697,7 +3702,7 @@ export default function InventoryPage() {
       : cols.filter((c) => c.colId !== LOGO_COLUMN_KEY);
 
     return gridColumnOrder.applyOrder(columnFreeze.applyFrozen(applicable));
-  }, [columnFreeze, gridColumnOrder, types, typeConfig, commonFields, gridEditMode, relevantRelTypes, relTypeObjGroupMap, relatedRefsOf, relationsLoading, selectedType, parentPaths, cardsById, parentNameOf, descendantIndex, filters.showArchived, selectedColumns, userNameMap, t, i18n.language, formatDate, formatDateTime, canViewCostsGlobally, canManageStakeholders, canEditLogos, logoColumnAvailable, openLogoMenu, tagGroups, stakeholderRoles, typeLabel, eolColumnAvailable, eolOf, eolLoading, tReports, calculatedKeys]);
+  }, [stageOf, stageLabel, customStages, columnFreeze, gridColumnOrder, types, typeConfig, commonFields, gridEditMode, relevantRelTypes, relTypeObjGroupMap, relatedRefsOf, relationsLoading, selectedType, parentPaths, cardsById, parentNameOf, descendantIndex, filters.showArchived, selectedColumns, userNameMap, t, i18n.language, formatDate, formatDateTime, canViewCostsGlobally, canManageStakeholders, canEditLogos, logoColumnAvailable, openLogoMenu, tagGroups, stakeholderRoles, typeLabel, eolColumnAvailable, eolOf, eolLoading, tReports, calculatedKeys]);
 
   // Feeds the Columns tab's "Column order" section: only the columns actually
   // on screen, built from the grid's own defs. On this page that matters twice

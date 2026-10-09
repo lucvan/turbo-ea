@@ -74,6 +74,7 @@ from app.services import (
     card_lifecycle,
     card_reference,
     card_write_service,
+    lifecycle_stages,
     notification_service,
 )
 from app.services.calculation_engine import run_calculations_for_card
@@ -94,6 +95,7 @@ from app.services.card_write_service import (
     _assign_reference_on_create,  # noqa: F401
     _check_hierarchy_depth,
     _check_hierarchy_label,
+    _check_lifecycle_stage,
     _check_parent_not_descendant,
     _check_required_not_cleared,
     _check_select_options,
@@ -104,6 +106,7 @@ from app.services.card_write_service import (
     _sync_hierarchy_levels,
     _validate_cost_attributes,
     _validate_hierarchy_label,
+    _validate_lifecycle_stage,
     _validate_percentage_attributes,
     _validate_strict_attributes,
     _validate_url_attributes,
@@ -158,6 +161,7 @@ def _card_to_response(
         parent_id=str(card.parent_id) if card.parent_id else None,
         parent_label=card.parent_label,
         lifecycle=card.lifecycle,
+        lifecycle_stage=card.lifecycle_stage,
         attributes=attributes,
         status=card.status,
         approval_status=card.approval_status,
@@ -643,6 +647,7 @@ async def create_card(
         parent_id=uuid.UUID(body.parent_id) if body.parent_id else None,
         parent_label=body.parent_label,
         lifecycle=body.lifecycle,
+        lifecycle_stage=body.lifecycle_stage,
         attributes=body.attributes,
         external_id=body.external_id,
         alias=body.alias,
@@ -928,6 +933,9 @@ async def bulk_create_cards(
             await _validate_hierarchy_label(
                 db, r.type, r.parent_label, None, has_parent=resolved_parent is not None
             )
+            # And the same stage check: an import cannot land a stage the
+            # type's vocabulary does not define.
+            await _validate_lifecycle_stage(db, r.type, r.lifecycle_stage, None)
 
             card = Card(
                 type=r.type,
@@ -937,6 +945,7 @@ async def bulk_create_cards(
                 parent_id=resolved_parent,
                 parent_label=r.parent_label if resolved_parent is not None else None,
                 lifecycle=r.lifecycle or {},
+                lifecycle_stage=r.lifecycle_stage or None,
                 attributes=r.attributes or {},
                 external_id=r.external_id,
                 alias=r.alias,
@@ -1556,13 +1565,15 @@ async def descendant_relations(
             if isinstance(sub, dict) and sub.get("key"):
                 subtype_order[sub["key"]] = idx
 
+    lc_view = await lifecycle_stages.lifecycle_view(db)
+
     def _sort_key(c: Card) -> tuple[int, int, str]:
         # Unknown / missing subtype sorts last, mirroring the trailing
         # "No subtype" bucket in the relations list.
         sub_idx = (
             subtype_order.get(c.subtype, len(subtype_order)) if c.subtype else len(subtype_order)
         )
-        return (sub_idx, lifecycle_rank(c.lifecycle), c.name.lower())
+        return (sub_idx, lifecycle_rank(lc_view(c)), c.name.lower())
 
     peer_cards.sort(key=_sort_key)
 
@@ -1579,7 +1590,7 @@ async def descendant_relations(
             name=p.name,
             type=p.type,
             subtype=p.subtype,
-            lifecycle=p.lifecycle or {},
+            lifecycle=lc_view(p) or {},
             via=[
                 DescendantRelationVia(id=str(d.id), name=d.name, type=d.type)
                 for d in sorted(peers.get(p.id, []), key=lambda d: d.name.lower())
@@ -1672,6 +1683,18 @@ async def bulk_update(
                 select(CardType.key, CardType.hierarchy_labels).where(CardType.key.in_(type_keys))
             )
             hierarchy_vocab = {key: vocab for key, vocab in rows.all()}
+
+    # And for the lifecycle stage vocabulary: per type, checked per card against
+    # its own stored stage. An empty string is the same request as null.
+    stage_configs: dict[str, dict | None] = {}
+    if "lifecycle_stage" in updates:
+        updates["lifecycle_stage"] = updates["lifecycle_stage"] or None
+        type_keys = {c.type for c in sheets}
+        if updates["lifecycle_stage"] and type_keys:
+            rows = await db.execute(
+                select(CardType.key, CardType.lifecycle_config).where(CardType.key.in_(type_keys))
+            )
+            stage_configs = {key: config for key, config in rows.all()}
 
     # A bulk edit that clears the parent takes every card's link label with it,
     # whether or not the caller sent one — the label describes an edge that no
@@ -1772,6 +1795,10 @@ async def bulk_update(
                     value,
                     card.parent_label,
                     has_parent=final_pid is not None,
+                )
+            elif field == "lifecycle_stage" and value:
+                _check_lifecycle_stage(
+                    card.type, stage_configs.get(card.type), value, card.lifecycle_stage
                 )
             old_val = getattr(card, field)
             if old_val != value:
@@ -3161,6 +3188,7 @@ async def export_json(
                 "name": card.name,
                 "description": card.description,
                 "lifecycle": card.lifecycle,
+                "lifecycle_stage": card.lifecycle_stage,
                 "attributes": attrs,
                 "status": card.status,
                 "data_quality": card.data_quality,
@@ -3219,7 +3247,17 @@ async def export_csv(
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(
-        ["id", "type", "name", "description", "status", "lifecycle", "attributes", "stakeholders"]
+        [
+            "id",
+            "type",
+            "name",
+            "description",
+            "status",
+            "lifecycle",
+            "lifecycle_stage",
+            "attributes",
+            "stakeholders",
+        ]
     )
     for card in sheets:
         attrs = card.attributes or {}
@@ -3234,6 +3272,7 @@ async def export_csv(
                 card.description or "",
                 card.status,
                 str(card.lifecycle),
+                card.lifecycle_stage or "",
                 str(attrs),
                 _stakeholders_cell(card),
             ]

@@ -707,5 +707,12 @@
   "todos.recurrence.years_one": "Every year",
   "todos.recurrence.years_other": "Every {{count}} years",
   "utils.cardId.tooltip": "Click to copy",
-  "utils.cardId.copied": "Copied!"
+  "utils.cardId.copied": "Copied!",
+  "lifecycle.currentStage": "Current stage",
+  "lifecycle.currentStageHelp": "Record the stage as it is today. No date is needed.",
+  "lifecycle.notStated": "Not stated (use the dates)",
+  "lifecycle.unknown": "Unknown",
+  "lifecycle.stated": "stated",
+  "lifecycle.fromDates": "from the dates",
+  "lifecycle.datesDisagree": "The dates put this card in {{stage}}"
 }

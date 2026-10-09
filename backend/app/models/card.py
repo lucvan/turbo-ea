@@ -26,6 +26,12 @@ class Card(Base, UUIDMixin, TimestampMixin):
     # and no `relations` row behind a parent/child link.
     parent_label: Mapped[str | None] = mapped_column(String(100))
     lifecycle: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    # The explicit current lifecycle stage, a key of the card type's
+    # ``lifecycle_config`` vocabulary, recorded without a date. NULL means "not
+    # stated": the stage is then derived from the ``lifecycle`` dates, and a
+    # card with neither is unknown. Unrelated to ``status`` below, which is
+    # record retention (ACTIVE / ARCHIVED) and moves only on archive/restore.
+    lifecycle_stage: Mapped[str | None] = mapped_column(String(50))
     attributes: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     status: Mapped[str] = mapped_column(String(20), default="ACTIVE")
     approval_status: Mapped[str] = mapped_column(String(20), default="DRAFT")

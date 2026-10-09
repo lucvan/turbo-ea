@@ -26,6 +26,7 @@ from app.models.tag import CardTag, Tag, TagGroup
 from app.models.todo import Todo
 from app.models.user import User
 from app.models.user_favorite import UserFavorite
+from app.services import lifecycle_stages
 from app.services.card_flags import (
     EOL_BUCKETS,
     EOL_TYPES,
@@ -123,8 +124,13 @@ async def dashboard(db: AsyncSession = Depends(get_db), user: User = Depends(get
     }
 
     # Lifecycle phase distribution
+    # Counted by what each card's current stage *means*, so a type with its own
+    # stage names lands in the same five buckets as everything else.
+    lc_view = await lifecycle_stages.lifecycle_view(db)
     lifecycle_result = await db.execute(
-        select(Card.lifecycle).where(Card.status == "ACTIVE", *readable)
+        select(Card.type, Card.lifecycle, Card.lifecycle_stage).where(
+            Card.status == "ACTIVE", *readable
+        )
     )
     lifecycle_dist: dict[str, int] = {
         "plan": 0,
@@ -134,8 +140,8 @@ async def dashboard(db: AsyncSession = Depends(get_db), user: User = Depends(get
         "endOfLife": 0,
         "none": 0,
     }
-    for (lc,) in lifecycle_result.all():
-        phase = _current_lifecycle_phase(lc)
+    for row in lifecycle_result.all():
+        phase = lc_view.phase(row)
         if phase and phase in lifecycle_dist:
             lifecycle_dist[phase] += 1
         else:
@@ -816,6 +822,7 @@ async def landscape(
     group_by: str = Query("BusinessCapability"),
 ):
     """Landscape report: cards grouped by a related type."""
+    lc_view = await lifecycle_stages.lifecycle_view(db)
     await PermissionService.require_permission(db, user, "reports.ea_dashboard")
     can_view_costs_global = await PermissionService.has_app_permission(db, user, "costs.view")
     readable = (await CardReadScope.load(db, user)).where(Card, mode="module")
@@ -877,7 +884,7 @@ async def landscape(
                 "name": card.name,
                 "type": card.type,
                 "attributes": _strip_attrs(card.attributes),
-                "lifecycle": card.lifecycle,
+                "lifecycle": lc_view(card),
             }
         )
 
@@ -935,6 +942,7 @@ async def portfolio(
     color_field: str = Query("businessCriticality"),
 ):
     """Portfolio scatter/bubble chart data."""
+    lc_view = await lifecycle_stages.lifecycle_view(db)
     await PermissionService.require_permission(db, user, "reports.portfolio")
 
     # M-3: Validate field params against the type's schema + safe format
@@ -976,7 +984,7 @@ async def portfolio(
                 "y": attrs.get(y_axis),
                 "size": attrs.get(size_field, 0),
                 "color": attrs.get(color_field),
-                "lifecycle": card.lifecycle,
+                "lifecycle": lc_view(card),
             }
         )
     return {"items": items, "x_axis": x_axis, "y_axis": y_axis}
@@ -995,6 +1003,7 @@ async def app_portfolio(
     report keeps working without changes. The Flexible Portfolio report passes
     other card type keys (BusinessCapability, Initiative, ITComponent, ...).
     """
+    lc_view = await lifecycle_stages.lifecycle_view(db)
     await PermissionService.require_permission(db, user, "reports.portfolio")
 
     # 0. Validate the requested card type exists and is visible.
@@ -1219,7 +1228,7 @@ async def app_portfolio(
                 "name": a.name,
                 "subtype": a.subtype,
                 "attributes": a.attributes,
-                "lifecycle": a.lifecycle,
+                "lifecycle": lc_view(a),
                 "relations": app_relations.get(aid, []),
                 "org_ids": sorted(app_orgs.get(aid, set())),
                 "tag_ids": app_tag_ids.get(aid, []),
@@ -1534,6 +1543,7 @@ async def roadmap(
     type: str | None = Query(None),
 ):
     """Roadmap: lifecycle timeline data."""
+    lc_view = await lifecycle_stages.lifecycle_view(db)
     await PermissionService.require_permission(db, user, "reports.ea_dashboard")
     read_scope = await CardReadScope.load(db, user)
     q = select(Card).where(Card.status == "ACTIVE", *read_scope.where(Card, mode="module"))
@@ -1543,9 +1553,11 @@ async def roadmap(
     sheets = result.scalars().all()
     items = []
     for card in sheets:
-        lc = card.lifecycle or {}
+        lc = lc_view(card) or {}
         attrs = card.attributes or {}
-        if any(lc.values()) or attrs.get("startDate") or attrs.get("endDate"):
+        # A timeline row needs a date; a stated stage alone has nothing to draw.
+        dated = any(v for k, v in lc.items() if k != lifecycle_stages.SEMANTIC_KEY)
+        if dated or attrs.get("startDate") or attrs.get("endDate"):
             items.append(
                 {
                     "id": str(card.id),
@@ -1570,6 +1582,7 @@ async def cost_report(
     Only cards live in the current fiscal year count, by the same rule as
     ``GET /reports/cost-treemap``.
     """
+    lc_view = await lifecycle_stages.lifecycle_view(db)
     # `costs.view` is the whole gate here, not an add-on. Elsewhere a report
     # carries its own base permission and adds `costs.view` only when the
     # request actually returns money (portfolio when an axis is a cost field,
@@ -1596,9 +1609,7 @@ async def cost_report(
             Card.type == type, Card.status == "ACTIVE", *read_scope.where(Card, mode="module")
         )
     )
-    sheets = [
-        c for c in result.scalars().all() if is_live_in_fiscal_year(c.lifecycle, fy, fy_start)
-    ]
+    sheets = [c for c in result.scalars().all() if is_live_in_fiscal_year(lc_view(c), fy, fy_start)]
     items = []
     total = 0
     for card in sheets:
@@ -1651,6 +1662,7 @@ async def cost_treemap(
     powers the treemap drill-down — clicking a parent rectangle re-queries with
     the related type as ``type`` and the parent's id as ``parent_card_id``.
     """
+    lc_view = await lifecycle_stages.lifecycle_view(db)
     # See `cost_report` above: `costs.view` alone gates a report that is
     # nothing but costs.
     await PermissionService.require_permission(db, user, "costs.view")
@@ -1665,9 +1677,7 @@ async def cost_treemap(
             Card.type == type, Card.status == "ACTIVE", *read_scope.where(Card, mode="module")
         )
     )
-    sheets = [
-        c for c in result.scalars().all() if is_live_in_fiscal_year(c.lifecycle, fy, fy_start)
-    ]
+    sheets = [c for c in result.scalars().all() if is_live_in_fiscal_year(lc_view(c), fy, fy_start)]
 
     if parent_card_id is not None:
         # Restrict sheets to those linked (in either direction) to the parent card.
@@ -1748,7 +1758,7 @@ async def cost_treemap(
             related_cards = [
                 c
                 for c in rel_result.scalars().all()
-                if is_live_in_fiscal_year(c.lifecycle, fy, fy_start)
+                if is_live_in_fiscal_year(lc_view(c), fy, fy_start)
             ]
             related_cost_by_id = {
                 str(c.id): cost_value((c.attributes or {}).get(field_key)) for c in related_cards
@@ -1796,7 +1806,7 @@ async def cost_treemap(
                     "id": str(card.id),
                     "name": card.name,
                     "cost": cost,
-                    "lifecycle": card.lifecycle,
+                    "lifecycle": lc_view(card),
                     "attributes": card.attributes,
                 }
             )
@@ -1811,7 +1821,7 @@ async def cost_treemap(
                     "id": str(card.id),
                     "name": card.name,
                     "cost": cost,
-                    "lifecycle": card.lifecycle,
+                    "lifecycle": lc_view(card),
                     "attributes": card.attributes,
                 }
             )
@@ -1879,6 +1889,7 @@ async def capability_heatmap(
     metric: str = Query("app_count"),
 ):
     """Business capability heatmap data with hierarchy."""
+    lc_view = await lifecycle_stages.lifecycle_view(db)
     await PermissionService.require_permission(db, user, "reports.ea_dashboard")
     # M-3: Whitelist valid metric values
     if metric not in {"app_count", "total_cost", "risk_count"}:
@@ -2033,7 +2044,7 @@ async def capability_heatmap(
             "name": a.name,
             "subtype": a.subtype,
             "attributes": attrs,
-            "lifecycle": a.lifecycle,
+            "lifecycle": lc_view(a),
             # Deduped: a related card reached through two relation types is one
             # card, and these lists drive filter matching and counts.
             "org_ids": sorted(set(by_type.get("Organization", []))),
@@ -2073,7 +2084,7 @@ async def capability_heatmap(
                 for ck in cost_field_keys:
                     total_cost += cost_value(attrs.get(ck))
 
-        risk_count = sum(1 for a in linked_apps if (a.lifecycle or {}).get("endOfLife"))
+        risk_count = sum(1 for a in linked_apps if (lc_view(a) or {}).get("endOfLife"))
 
         items.append(
             {
@@ -2143,6 +2154,7 @@ async def dependencies(
     type: str | None = Query(None),
 ):
     """Dependency / interface map: nodes + edges for graph rendering."""
+    lc_view = await lifecycle_stages.lifecycle_view(db)
     await PermissionService.require_permission(db, user, "reports.ea_dashboard")
     # Always load ALL active cards for ancestor path resolution — every card the
     # reader may see. Filtering this one load removes hidden cards from the
@@ -2244,7 +2256,7 @@ async def dependencies(
                 # The card's other name: the Layered Dependency View offers it
                 # as an "Alias" row under the name, like the subtype (#1211).
                 "alias": card.alias,
-                "lifecycle": card.lifecycle,
+                "lifecycle": lc_view(card),
                 "attributes": card.attributes,
                 "parent_id": str(card.parent_id) if card.parent_id else None,
                 "path": _ancestor_path(nid),
@@ -2289,6 +2301,7 @@ async def data_quality(db: AsyncSession = Depends(get_db), user: User = Depends(
     truth — "no relation at all", counting relations to hidden cards — so the
     tile keeps agreeing with ``orphaned_condition()`` behind its drill-down.
     """
+    lc_view = await lifecycle_stages.lifecycle_view(db)
     await PermissionService.require_permission(db, user, "reports.ea_dashboard")
     read_scope = await CardReadScope.load(db, user)
     result = await db.execute(
@@ -2328,7 +2341,11 @@ async def data_quality(db: AsyncSession = Depends(get_db), user: User = Depends(
     )
 
     # Lifecycle completeness
-    with_lifecycle = sum(1 for card in sheets if card.lifecycle and any(card.lifecycle.values()))
+    with_lifecycle = sum(
+        1
+        for card in sheets
+        if lifecycle_stages.has_lifecycle_data(card.lifecycle, card.lifecycle_stage)
+    )
 
     # Orphaned items (no relations) – use UNION to get distinct connected IDs
     all_ids = {str(card.id) for card in sheets}
@@ -2358,7 +2375,7 @@ async def data_quality(db: AsyncSession = Depends(get_db), user: User = Depends(
         manual = sum(
             1
             for card in of_type
-            if not has_eol_link(card.attributes) and has_manual_eol(card.lifecycle)
+            if not has_eol_link(card.attributes) and has_manual_eol(lc_view(card))
         )
         eol_coverage.append(
             {
@@ -2370,7 +2387,7 @@ async def data_quality(db: AsyncSession = Depends(get_db), user: User = Depends(
                 # definition of "missing" that could drift from the one the
                 # EOL report uses.
                 "missing": sum(
-                    1 for card in of_type if not has_eol_coverage(card.attributes, card.lifecycle)
+                    1 for card in of_type if not has_eol_coverage(card.attributes, lc_view(card))
                 ),
                 "total": len(of_type),
             }
@@ -2473,7 +2490,13 @@ async def data_quality_cards(
     elif scope == "orphaned":
         conditions.append(orphaned_condition())
     elif scope in eol_scopes:
-        conditions.append(eol_bucket_condition(eol_scopes[scope]))
+        configs = await lifecycle_stages.load_configs(db)
+        conditions.append(
+            eol_bucket_condition(
+                eol_scopes[scope],
+                {t: lifecycle_stages.retired_keys(configs, t) for t in EOL_TYPES},
+            )
+        )
 
     total_result = await db.execute(select(func.count()).select_from(Card).where(*conditions))
     total = total_result.scalar_one()
@@ -2534,6 +2557,7 @@ async def eol_report(
     report used to drop them silently, which made the one question the report
     is best placed to answer the one it could not.
     """
+    lc_view = await lifecycle_stages.lifecycle_view(db)
     await PermissionService.require_permission(db, user, "reports.ea_dashboard")
     read_scope = await CardReadScope.load(db, user)
     # 1. Fetch all active Applications and ITComponents the reader may see
@@ -2557,7 +2581,7 @@ async def eol_report(
     for card in all_sheets:
         if has_eol_link(card.attributes):
             api_sheets.append(card)
-        elif has_manual_eol(card.lifecycle):
+        elif has_manual_eol(lc_view(card)):
             manual_sheets.append(card)
         else:
             missing_sheets.append(card)
@@ -2609,7 +2633,7 @@ async def eol_report(
                 {
                     "id": app_id,
                     "name": app_map[app_id].name,
-                    "lifecycle": app_map[app_id].lifecycle,
+                    "lifecycle": lc_view(app_map[app_id]),
                 }
             )
 
@@ -2664,14 +2688,14 @@ async def eol_report(
                 "status": status,
                 "source": "api",
                 "cycle_data": cycle_data,
-                "lifecycle": card.lifecycle,
+                "lifecycle": lc_view(card),
                 "affected_apps": affected_apps,
             }
         )
 
     # 4b. Manually maintained items (lifecycle.endOfLife set, no API link)
     for card in manual_sheets:
-        lifecycle = card.lifecycle or {}
+        lifecycle = lc_view(card) or {}
         status = manual_eol_status(lifecycle)
         manual_count += 1
 
@@ -2728,7 +2752,7 @@ async def eol_report(
                 "status": "missing",
                 "source": "none",
                 "cycle_data": None,
-                "lifecycle": card.lifecycle,
+                "lifecycle": lc_view(card),
                 "affected_apps": it_to_apps.get(str(card.id), []),
             }
         )

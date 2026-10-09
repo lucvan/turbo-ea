@@ -190,6 +190,23 @@ Click the **Translate** button in the type drawer toolbar to open the **Translat
 
 Translations are stored alongside each card type and are resolved at render time using the user's selected locale. Untranslated labels fall back to the English default.
 
+### Lifecycle stages
+
+By default every card type uses the five built-in lifecycle phases (Plan, Phase In, Active, Phase Out, End of Life). Each type can instead define its own ordered **lifecycle stages**. Open the type and click the timeline icon next to **Lifecycle stages**.
+
+Each stage has:
+
+- **Key** — the stable identifier cards store. It is locked once saved, so a stage can be renamed without touching any card.
+- **Label** and **colour** — free to change at any time, and translatable.
+- **Meaning** — what the stage means to reports, whatever it is called: **Pre-operational**, **Operational**, **Retiring** or **Retired**. Reports, cost figures and the dashboard go by the meaning, so a renamed or re-ordered vocabulary keeps reporting correctly.
+- **Position** — use the arrows to order the stages.
+
+**Load Evaluating → Discontinued** fills in a ready-made vocabulary (Evaluating is pre-operational; Emerging, Core and Heritage are operational; Sunset is retiring; Discontinued is retired). **Clear** returns the type to the built-in phases.
+
+Removing a stage that cards still use — as their current stage or under a date — is refused. The editor shows how many cards use it and asks which remaining stage they move to; their dates move with them. A move that would overwrite a date a card already has for the target stage is refused, so no date is ever lost. Switching a type from the built-in phases to its own stages counts as removing the five built-in phases, so cards that already carry dates under them have to be reassigned in the same step.
+
+In reports that span card types, a type's own stages appear under the built-in phase that carries the same meaning. A card whose stage is stated without a date is left off timelines, and is treated as retired or not yet started where its stage says so.
+
 ### Deleting a Type
 
 - **Built-in types** are soft-deleted (hidden) and can be restored

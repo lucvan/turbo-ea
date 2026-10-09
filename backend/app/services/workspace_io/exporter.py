@@ -62,6 +62,7 @@ CARD_TYPE_COLUMNS = (
     "allow_card_logo",
     "subtypes",
     "hierarchy_labels",
+    "lifecycle_config",
     "fields_schema",
     "stakeholder_roles",
     "section_config",
@@ -76,6 +77,7 @@ CARD_TYPE_JSON = frozenset(
     {
         "subtypes",
         "hierarchy_labels",
+        "lifecycle_config",
         "fields_schema",
         "stakeholder_roles",
         "section_config",
@@ -124,6 +126,7 @@ CARD_COLUMNS = (
     "approval_status",
     "status",
     "lifecycle",
+    "lifecycle_stage",
     "attributes",
 )
 CARD_JSON = frozenset({"lifecycle", "attributes"})
@@ -305,6 +308,7 @@ async def build_bundle(db: AsyncSession, *, include_archived: bool = False) -> b
             "approval_status": c.approval_status,
             "status": c.status,
             "lifecycle": c.lifecycle or {},
+            "lifecycle_stage": c.lifecycle_stage,
             "attributes": c.attributes or {},
         }
         for c in cards

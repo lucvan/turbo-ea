@@ -955,3 +955,137 @@ class TestArchiveCardsValidation:
             "child_strategy": "cascade",
             "reason": "cleanup",
         }
+
+
+RADAR_TYPE = {
+    "key": "Application",
+    "lifecycle_stages": [{"key": "core"}, {"key": "sunset"}, {"key": "discontinued"}],
+}
+
+
+def _stage_get(card: dict):
+    async def _get(self, path, **_kw):
+        return RADAR_TYPE if path.startswith("/metamodel/types/") else card
+
+    return _get
+
+
+class TestSetCardLifecycleStage:
+    @pytest.mark.asyncio
+    async def test_dry_run_previews_without_writing(self, fake_token):
+        patch_mock = AsyncMock()
+        card = {"id": "c1", "type": "Application", "lifecycle_stage": "core"}
+        with (
+            patch.object(server.TurboEAClient, "get", _stage_get(card)),
+            patch.object(server.TurboEAClient, "patch", patch_mock),
+        ):
+            out = await server.set_card_lifecycle_stage(card_id="c1", stage="sunset")
+        patch_mock.assert_not_called()
+        assert _parse(out) == {
+            "dry_run": True,
+            "would_set": {
+                "card_id": "c1",
+                "lifecycle_stage_before": "core",
+                "lifecycle_stage_after": "sunset",
+            },
+        }
+
+    @pytest.mark.asyncio
+    async def test_commit_patches_only_the_stage(self, fake_token):
+        patch_mock = AsyncMock(return_value={"id": "c1", "lifecycle_stage": "sunset"})
+        card = {"id": "c1", "type": "Application", "lifecycle": {"core": "2020-01-01"}}
+        with (
+            patch.object(server.TurboEAClient, "get", _stage_get(card)),
+            patch.object(server.TurboEAClient, "patch", patch_mock),
+        ):
+            out = await server.set_card_lifecycle_stage(
+                card_id="c1", stage="sunset", dry_run=False
+            )
+        patch_mock.assert_awaited_once_with("/cards/c1", json={"lifecycle_stage": "sunset"})
+        assert _parse(out)["lifecycle_stage"] == "sunset"
+
+    @pytest.mark.asyncio
+    async def test_empty_stage_clears_it(self, fake_token):
+        patch_mock = AsyncMock(return_value={"id": "c1", "lifecycle_stage": None})
+        card = {"id": "c1", "type": "Application", "lifecycle_stage": "core"}
+        with (
+            patch.object(server.TurboEAClient, "get", _stage_get(card)),
+            patch.object(server.TurboEAClient, "patch", patch_mock),
+        ):
+            preview = await server.set_card_lifecycle_stage(card_id="c1", stage="")
+            await server.set_card_lifecycle_stage(card_id="c1", stage="", dry_run=False)
+        assert _parse(preview)["would_set"]["lifecycle_stage_after"] is None
+        patch_mock.assert_awaited_once_with("/cards/c1", json={"lifecycle_stage": None})
+
+    @pytest.mark.asyncio
+    async def test_rejects_a_stage_the_type_does_not_define(self, fake_token):
+        patch_mock = AsyncMock()
+        card = {"id": "c1", "type": "Application"}
+        with (
+            patch.object(server.TurboEAClient, "get", _stage_get(card)),
+            patch.object(server.TurboEAClient, "patch", patch_mock),
+        ):
+            out = await server.set_card_lifecycle_stage(
+                card_id="c1", stage="active", dry_run=False
+            )
+        patch_mock.assert_not_called()
+        data = _parse(out)
+        assert data["error"] == "invalid_lifecycle_stage"
+        assert data["valid_stages"] == ["core", "sunset", "discontinued"]
+        assert "'active'" in data["message"]
+
+    @pytest.mark.asyncio
+    async def test_reports_a_backend_failure(self, fake_token):
+        async def _boom(self, path, **_kw):
+            raise RuntimeError("404 Not Found")
+
+        with patch.object(server.TurboEAClient, "get", _boom):
+            out = await server.set_card_lifecycle_stage(card_id="c1", stage="core")
+        assert out == "Error: 404 Not Found"
+
+
+class TestTransitionToACustomStage:
+    @pytest.mark.asyncio
+    async def test_a_type_stage_is_a_dated_transition(self, fake_token):
+        patch_mock = AsyncMock(return_value={"ok": True})
+        card = {"id": "c1", "type": "Application", "lifecycle": {"core": "2020-01-01"}}
+        with (
+            patch.object(server.TurboEAClient, "get", _stage_get(card)),
+            patch.object(server.TurboEAClient, "patch", patch_mock),
+        ):
+            preview = await server.transition_card_lifecycle(
+                card_id="c1", target="sunset", effective_date="2027-01-01"
+            )
+            await server.transition_card_lifecycle(
+                card_id="c1", target="sunset", effective_date="2027-01-01", dry_run=False
+            )
+        wt = _parse(preview)["would_transition"]
+        assert wt["family"] == "lifecycle_phase"
+        assert wt["lifecycle_after"] == {"core": "2020-01-01", "sunset": "2027-01-01"}
+        patch_mock.assert_awaited_once_with(
+            "/cards/c1", json={"lifecycle": {"core": "2020-01-01", "sunset": "2027-01-01"}}
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_target_lists_the_types_stages(self, fake_token):
+        card = {"id": "c1", "type": "Application"}
+        with patch.object(server.TurboEAClient, "get", _stage_get(card)):
+            out = await server.transition_card_lifecycle(card_id="c1", target="bogus")
+        data = _parse(out)
+        assert data["error"] == "invalid_target"
+        assert "['core', 'discontinued', 'sunset']" in data["message"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("target", ["PHASING_OUT", "END_OF_LIFE", "PHASING_IN"])
+    async def test_lifecycle_words_are_not_card_statuses(self, fake_token, target):
+        patch_mock = AsyncMock()
+        card = {"id": "c1", "type": "Application"}
+        with (
+            patch.object(server.TurboEAClient, "get", _stage_get(card)),
+            patch.object(server.TurboEAClient, "patch", patch_mock),
+        ):
+            out = await server.transition_card_lifecycle(
+                card_id="c1", target=target, dry_run=False
+            )
+        patch_mock.assert_not_called()
+        assert _parse(out)["error"] == "invalid_target"

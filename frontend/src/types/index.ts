@@ -265,6 +265,19 @@ export interface DataQualityConfig {
   stakeholders?: number;
 }
 
+export type StageSemantic = "pre_operational" | "operational" | "retiring" | "retired";
+
+/** One stage of a card type's lifecycle vocabulary. `key` is the stable
+ *  identifier cards store; label, colour and order are free to change. */
+export interface LifecycleStageDef {
+  key: string;
+  label: string;
+  color: string;
+  /** What the stage means to a report, whatever it is called. */
+  semantic: StageSemantic;
+  translations?: TranslationMap;
+}
+
 export interface CardType {
   key: string;
   label: string;
@@ -283,6 +296,11 @@ export interface CardType {
    *  colours, translations and the `OptionChip` renderer for free. Empty (or
    *  absent) means the feature renders nowhere for this type. */
   hierarchy_labels?: FieldOption[];
+  /** The type's own lifecycle stage vocabulary. Empty (or absent) means the
+   *  built-in five phases. */
+  lifecycle_config?: { stages?: LifecycleStageDef[] };
+  /** The stages in force — the type's own, or the built-in model. */
+  lifecycle_stages?: LifecycleStageDef[];
   fields_schema: SectionDef[];
   stakeholder_roles?: StakeholderRoleDefinition[];
   section_config?: Record<string, SectionConfig>;
@@ -377,6 +395,9 @@ export interface Card {
    *  loses its parent. */
   parent_label?: string | null;
   lifecycle?: Record<string, string>;
+  /** Explicit current lifecycle stage, recorded without a date. Null means
+   *  "not stated": the stage is then derived from the `lifecycle` dates. */
+  lifecycle_stage?: string | null;
   attributes?: Record<string, unknown>;
   status: string;
   approval_status: string;

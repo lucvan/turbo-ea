@@ -188,8 +188,12 @@ def _jsonb_absent(col):
 EOL_BUCKETS = ("linked", "manual", "missing")
 
 
-def eol_bucket_condition(bucket: str):
+def eol_bucket_condition(bucket: str, manual_keys: dict[str, list[str]] | None = None):
     """SQLAlchemy condition selecting one EOL coverage bucket.
+
+    ``manual_keys`` maps a card type to the lifecycle keys under which it
+    records a retirement date — its ``retired`` stages when it defines its own
+    lifecycle vocabulary. A type absent from the map uses ``endOfLife``.
 
     Mirrors :func:`has_eol_link` / :func:`has_manual_eol` /
     :func:`has_eol_coverage` exactly, so a bucket's row count matches the bar
@@ -207,7 +211,23 @@ def eol_bucket_condition(bucket: str):
 
     product = Card.attributes[EOL_PRODUCT_KEY]
     cycle = Card.attributes[EOL_CYCLE_KEY]
-    end_of_life = Card.lifecycle["endOfLife"]
+
+    # "A manual End-of-Life date is present", per type: any of the type's
+    # retirement keys holds a value. The absent form is written positively too
+    # (every key absent), for the reason `_jsonb_absent` gives.
+    keys_by_type = {t: (manual_keys or {}).get(t) or ["endOfLife"] for t in sorted(EOL_TYPES)}
+    manual_present = or_(
+        *(
+            and_(Card.type == t, or_(*(_jsonb_present(Card.lifecycle[k]) for k in keys)))
+            for t, keys in keys_by_type.items()
+        )
+    )
+    manual_absent = or_(
+        *(
+            and_(Card.type == t, and_(*(_jsonb_absent(Card.lifecycle[k]) for k in keys)))
+            for t, keys in keys_by_type.items()
+        )
+    )
 
     linked = and_(_jsonb_present(product), _jsonb_present(cycle))
     # Half a link resolves to nothing upstream, so it is not a link at all.
@@ -216,8 +236,8 @@ def eol_bucket_condition(bucket: str):
     if bucket == "linked":
         rule = linked
     elif bucket == "manual":
-        rule = and_(not_linked, _jsonb_present(end_of_life))
+        rule = and_(not_linked, manual_present)
     else:
-        rule = and_(not_linked, _jsonb_absent(end_of_life))
+        rule = and_(not_linked, manual_absent)
 
     return and_(Card.type.in_(EOL_TYPES), rule)

@@ -25,6 +25,7 @@ import CardLogoMenu from "@/components/CardLogoMenu";
 import CardLogoAvatar from "@/components/CardLogoAvatar";
 import ApprovalStatusBadge from "@/components/ApprovalStatusBadge";
 import LifecycleBadge from "@/components/LifecycleBadge";
+import { useLifecycleStages } from "@/hooks/useLifecycleStages";
 import AiSuggestPanel, { type AiApplyPayload } from "@/components/AiSuggestPanel";
 import ArchiveDeleteDialog from "@/features/cards/ArchiveDeleteDialog";
 import RestoreDialog from "@/features/cards/RestoreDialog";
@@ -67,6 +68,7 @@ const DEFAULT_PERMISSIONS: CardEffectivePermissions["effective"] = {
 // ── Main Detail Page ────────────────────────────────────────────
 export default function CardDetail() {
   const { t } = useTranslation(["cards", "common", "validation"]);
+  const { customStages } = useLifecycleStages();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -713,7 +715,11 @@ export default function CardDetail() {
         {/* Badges + overflow menu — wrap to second row on mobile */}
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, width: { xs: "100%", sm: "auto" }, justifyContent: { xs: "flex-end", sm: "flex-start" } }}>
           <DataQualityPill value={card.data_quality} />
-          <LifecycleBadge lifecycle={card.lifecycle} />
+          <LifecycleBadge
+            lifecycle={card.lifecycle}
+            stage={card.lifecycle_stage}
+            stages={customStages(card.type)}
+          />
           <ApprovalStatusBadge
             status={card.approval_status}
             canChange={perms.can_approval_status}

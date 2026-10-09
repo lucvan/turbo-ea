@@ -154,7 +154,7 @@ async def search_cards(
     Args:
         query: Free-text search across card name, description and alias.
         type: Filter by card type key (e.g. 'Application', 'ITComponent').
-        status: Filter by status ('ACTIVE', 'PHASING_IN', 'PHASING_OUT', 'END_OF_LIFE', 'ARCHIVED').
+        status: Filter by status ('ACTIVE' or 'ARCHIVED').
         page: Page number (default 1).
         page_size: Results per page (default 20, max 100).
     """
@@ -781,6 +781,81 @@ async def rollback_batch(
     return _fmt(data)
 
 
+async def _card_stage_keys(client: TurboEAClient, card_id: str) -> list[str]:
+    """The lifecycle stage keys of a card's type, in order.
+
+    Empty when the card or its type cannot be read — the caller then falls
+    back to the built-in phases, which is what an unreadable card gets anyway.
+    """
+    try:
+        card = await client.get(f"/cards/{card_id}")
+        ctype = await client.get(f"/metamodel/types/{card['type']}")
+        return [s["key"] for s in ctype.get("lifecycle_stages") or [] if s.get("key")]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+@mcp.tool(annotations=_WRITE_ADDITIVE_ANNOT)
+async def set_card_lifecycle_stage(
+    card_id: str,
+    stage: str,
+    dry_run: bool = True,
+) -> str:
+    """Record a card's current lifecycle stage, without a date.
+
+    The stage is one of the card type's stage keys (``lifecycle_stages`` in
+    ``list_card_types``): the built-in ``plan`` / ``phaseIn`` / ``active`` /
+    ``phaseOut`` / ``endOfLife``, or the type's own vocabulary. It is a
+    separate fact from the dated ``lifecycle`` record and from the card's
+    ``status``; setting it changes neither. An empty ``stage`` clears it, so
+    the stage is derived from the lifecycle dates again — and is unknown when
+    there are none.
+
+    Args:
+        card_id: Card UUID.
+        stage: Stage key, or ``""`` to clear the explicit stage.
+        dry_run: When True (default), validate the stage against the card
+            type's vocabulary and return a before/after preview without
+            writing. Re-run with ``dry_run=False`` to commit.
+    """
+    token = await _get_current_token()
+    if not token:
+        return "Error: Not authenticated. Please reconnect."
+    if (disabled := _writes_disabled_message()) is not None:
+        return disabled
+    client = TurboEAClient(token)
+    try:
+        card = await client.get(f"/cards/{card_id}")
+        ctype = await client.get(f"/metamodel/types/{card['type']}")
+        valid = [s["key"] for s in ctype.get("lifecycle_stages") or [] if s.get("key")]
+        if stage and stage not in valid:
+            return _fmt(
+                {
+                    "error": "invalid_lifecycle_stage",
+                    "message": (
+                        f"Card type '{card['type']}' does not define lifecycle stage "
+                        f"'{stage}'. Valid stages: {valid}."
+                    ),
+                    "valid_stages": valid,
+                }
+            )
+        if dry_run:
+            return _fmt(
+                {
+                    "dry_run": True,
+                    "would_set": {
+                        "card_id": card_id,
+                        "lifecycle_stage_before": card.get("lifecycle_stage"),
+                        "lifecycle_stage_after": stage or None,
+                    },
+                }
+            )
+        data = await client.patch(f"/cards/{card_id}", json={"lifecycle_stage": stage or None})
+        return _fmt(data)
+    except Exception as exc:  # noqa: BLE001
+        return f"Error: {exc}"
+
+
 @mcp.tool(annotations=_WRITE_ADDITIVE_ANNOT)
 async def transition_card_lifecycle(
     card_id: str,
@@ -794,11 +869,17 @@ async def transition_card_lifecycle(
     - Approval actions: ``approve``, ``reject``, ``reset``. Posts to
       ``/cards/{id}/approval-status?action=...``.
     - Lifecycle phases: ``plan``, ``phaseIn``, ``active``, ``phaseOut``,
-      ``endOfLife``. The card's ``lifecycle`` JSONB is a phase→date
+      ``endOfLife`` — or, for a card type that defines its own lifecycle
+      stages, one of that type's stage keys (see ``lifecycle_stages`` in
+      ``list_card_types``). The card's ``lifecycle`` JSONB is a stage→date
       record (``{"active": "2026-06-01", ...}``); the transition sets
-      the target phase's date and preserves every other phase date.
-    - Status values: ``ACTIVE``, ``PHASING_IN``, ``PHASING_OUT``,
-      ``END_OF_LIFE``, ``ARCHIVED``. Patches ``status`` directly.
+      the target stage's date and preserves every other date. This
+      records a *dated* transition. To record the current stage without
+      a date, use ``set_card_lifecycle_stage``.
+    - Status values: ``ACTIVE``, ``ARCHIVED``. Patches ``status`` directly.
+      Status is record retention, not lifecycle: a card that is being
+      phased out or has reached end of life gets a lifecycle stage, not
+      a status.
 
     When the caller lacks the necessary permission, the tool returns a
     ``pending`` response with a deep-link to the card detail page
@@ -825,7 +906,7 @@ async def transition_card_lifecycle(
         return disabled
     approval_targets = {"approve", "reject", "reset"}
     phase_targets = {"plan", "phaseIn", "active", "phaseOut", "endOfLife"}
-    status_targets = {"ACTIVE", "PHASING_IN", "PHASING_OUT", "END_OF_LIFE", "ARCHIVED"}
+    status_targets = {"ACTIVE", "ARCHIVED"}
 
     # Validate the target up-front so an unrecognised value is reported
     # even during a preview, before any backend call is attempted.
@@ -835,7 +916,13 @@ async def transition_card_lifecycle(
         family = "lifecycle_phase"
     elif target in status_targets:
         family = "status"
+    elif target in (type_stages := await _card_stage_keys(TurboEAClient(token), card_id)):
+        # A stage of the card type's own vocabulary is a dated transition too.
+        family = "lifecycle_phase"
+        phase_targets = set(type_stages)
     else:
+        if type_stages:
+            phase_targets = set(type_stages)
         return _fmt(
             {
                 "error": "invalid_target",
@@ -1733,8 +1820,10 @@ async def update_cards_bulk(
         updates: List of update dicts. Each dict carries:
             - ``card_id`` (UUID string, required).
             - One or more of ``name``, ``subtype``, ``description``,
-              ``parent_id``, ``lifecycle``, ``attributes``, ``status``,
-              ``external_id``, ``alias``.
+              ``parent_id``, ``lifecycle``, ``lifecycle_stage``,
+              ``attributes``, ``status``, ``external_id``, ``alias``.
+              ``lifecycle_stage`` is the explicit current stage (a key of
+              the card type's ``lifecycle_stages``), recorded without a date.
             ``attributes`` is a *full replace* — supply the complete
             map of fields you want on the card after the update.
             (Backend preserves cost-typed keys the caller can't see.)
@@ -3171,7 +3260,11 @@ async def create_cards_bulk(
             - `attributes` (dict, optional): metamodel fields keyed by field
               key. Unknown keys are accepted (stored as JSONB) but won't
               show in the UI — match the type's `fields_schema`.
-            - `lifecycle` (dict, optional): `{phase, start_date, end_date}`.
+            - `lifecycle` (dict, optional): stage key → ISO date, e.g.
+              `{"active": "2026-06-01"}`. Leave it out when no date is known.
+            - `lifecycle_stage` (str, optional): the current stage, a key of
+              the card type's `lifecycle_stages`, recorded without a date.
+              Leave it out when the stage is unknown; nothing is defaulted.
             - `external_id`, `alias`, `approval_status` (str, optional).
             Single-row imports work too — pass a 1-item list.
         dry_run: When True (default), validate every row and return the

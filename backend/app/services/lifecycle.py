@@ -96,6 +96,11 @@ def is_live_in_fiscal_year(lifecycle: dict | None, fiscal_year: int, start_month
     which is what the cost report showed before it knew about lifecycles.
     """
     lc = lifecycle or {}
+    # A reporting projection may carry the card's explicit stage where no date
+    # says the same thing (`lifecycle_stages.SEMANTIC_KEY`): stated as retired,
+    # or as not yet operational. Neither is part of the landscape.
+    if lc.get("_semantic") in ("retired", "pre_operational"):
+        return False
     active = parse_lifecycle_date(lc.get("active"))
     if active is not None:
         if fiscal_year_for(active, start_month) > fiscal_year:

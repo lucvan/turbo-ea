@@ -41,6 +41,8 @@ import StakeholderRolePanel from "./StakeholderRolePanel";
 import CardTypePermissionsPanel from "./CardTypePermissionsPanel";
 import TranslationDialog from "./TranslationDialog";
 import RelationsTabContent from "./RelationsTabContent";
+import LifecycleStagesDialog from "./LifecycleStagesDialog";
+import { customStagesOf, stagesOf } from "@/lib/lifecycleStages";
 
 /* ------------------------------------------------------------------ */
 /*  Type Detail Dialog (full-width, 2-panel layout)                    */
@@ -109,6 +111,7 @@ export default function TypeDetailDrawer({
 
   /* --- Subtype inline add --- */
   const [addSubOpen, setAddSubOpen] = useState(false);
+  const [stagesOpen, setStagesOpen] = useState(false);
   const [newSubKey, setNewSubKey] = useState("");
   const [newSubLabel, setNewSubLabel] = useState("");
 
@@ -784,6 +787,38 @@ export default function TypeDetailDrawer({
               )}
             </Box>
           </Box>
+        </Box>
+
+        {/* -- Lifecycle stages -- */}
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 3 }}>
+          <Typography variant="subtitle1" fontWeight={700}>
+            {t("metamodel.lifecycleStages.title")}
+          </Typography>
+          {customStagesOf(cardTypeKey) ? (
+            <Tooltip title={stagesOf(cardTypeKey).map((s) => stLabel(s)).join(" → ")}>
+              <Chip
+                size="small"
+                color="secondary"
+                label={stagesOf(cardTypeKey).length}
+                sx={{ height: 22, fontSize: 11 }}
+              />
+            </Tooltip>
+          ) : (
+            <Typography variant="body2" color="text.secondary" fontStyle="italic">
+              {t("metamodel.lifecycleStages.builtIn")}
+            </Typography>
+          )}
+          <Tooltip title={t("metamodel.lifecycleStages.edit")}>
+            <IconButton size="small" onClick={() => setStagesOpen(true)}>
+              <MaterialSymbol icon="timeline" size={18} />
+            </IconButton>
+          </Tooltip>
+          <LifecycleStagesDialog
+            open={stagesOpen}
+            cardType={cardTypeKey}
+            onClose={() => setStagesOpen(false)}
+            onSaved={onRefresh}
+          />
         </Box>
 
         {/* -- Subtypes -- */}

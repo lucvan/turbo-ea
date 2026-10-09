@@ -50,6 +50,17 @@ export function useMetamodel() {
         .finally(() => {
           if (!cancelled) setLoading(false);
         });
+    } else {
+      // The cache can land between this component's first render (which read
+      // an empty cache into state) and this effect: another consumer's fetch
+      // resolves in the gap. Nothing would ever deliver that snapshot here,
+      // and the component would hold an empty metamodel for good — a diagram
+      // editor whose Create Card dialog offers no types. Sync from the cache.
+      // Same guard as the initial state: a snapshot without a list is left
+      // alone. Setting the identical arrays again is a no-op for React.
+      if (_cache.types) setTypes(_cache.types);
+      if (_cache.relationTypes) setRelationTypes(_cache.relationTypes);
+      setLoading(false);
     }
     return () => {
       cancelled = true;

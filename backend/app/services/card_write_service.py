@@ -47,7 +47,13 @@ from app.models.card_type import CardType
 from app.models.ppm_cost_line import PpmBudgetLine, PpmCostLine
 from app.models.relation import Relation
 from app.models.relation_type import RelationType
-from app.services import card_approval, card_lifecycle, card_reference, notification_service
+from app.services import (
+    card_approval,
+    card_lifecycle,
+    card_reference,
+    lifecycle_stages,
+    notification_service,
+)
 from app.services.calculation_engine import run_calculations_for_card
 from app.services.card_uniqueness import check_sibling_name_unique
 from app.services.cost_value import is_numeric_text
@@ -442,6 +448,51 @@ async def _validate_hierarchy_label(
     _check_hierarchy_label(card_type, vocabulary, new_label, old_label, has_parent)
 
 
+#: The only values ``cards.status`` takes. It records retention, not lifecycle.
+CARD_STATUSES = ("ACTIVE", "ARCHIVED")
+
+
+def _check_lifecycle_stage(
+    card_type: str,
+    lifecycle_config: dict | None,
+    new_stage: str | None,
+    old_stage: str | None,
+) -> None:
+    """Reject an explicit lifecycle stage the card type does not define.
+
+    Same narrow shape as ``_check_hierarchy_label``: clearing the stage passes,
+    and so does a value unchanged from what is stored, so a card stays editable
+    after an admin reshapes the vocabulary around it.
+    """
+    if not new_stage or new_stage == old_stage:
+        return
+    valid = lifecycle_stages.stage_keys(lifecycle_stages.stages_for(lifecycle_config))
+    if new_stage in valid:
+        return
+    raise HTTPException(
+        422,
+        {
+            "code": "invalid_lifecycle_stage",
+            "message": (
+                f"Card type '{card_type}' does not define lifecycle stage {new_stage!r}; "
+                f"valid stages: {', '.join(valid)}."
+            ),
+            "valid_stages": valid,
+            "card_type": card_type,
+        },
+    )
+
+
+async def _validate_lifecycle_stage(
+    db: AsyncSession, card_type: str, new_stage: str | None, old_stage: str | None
+) -> None:
+    """Fetch the type's stage vocabulary and run the stage check against it."""
+    if not new_stage or new_stage == old_stage:
+        return
+    result = await db.execute(select(CardType.lifecycle_config).where(CardType.key == card_type))
+    _check_lifecycle_stage(card_type, result.scalar_one_or_none(), new_stage, old_stage)
+
+
 async def _validate_strict_attributes(db: AsyncSession, card_type: str, attributes: dict) -> None:
     """Reject ``attributes`` keys that are not declared in the type's
     ``fields_schema`` (S5).
@@ -753,6 +804,7 @@ async def create_card(
     parent_id: uuid.UUID | None = None,
     parent_label: str | None = None,
     lifecycle: dict | None = None,
+    lifecycle_stage: str | None = None,
     attributes: dict | None = None,
     external_id: str | None = None,
     alias: str | None = None,
@@ -768,6 +820,7 @@ async def create_card(
     await _validate_hierarchy_label(
         db, type_key, parent_label, None, has_parent=parent_id is not None
     )
+    await _validate_lifecycle_stage(db, type_key, lifecycle_stage, None)
     if strict_attributes:
         await _validate_strict_attributes(db, type_key, attributes or {})
     await check_sibling_name_unique(db, type_key=type_key, parent_id=parent_id, name=name)
@@ -779,6 +832,7 @@ async def create_card(
         parent_id=parent_id,
         parent_label=parent_label if parent_id is not None else None,
         lifecycle=lifecycle or {},
+        lifecycle_stage=lifecycle_stage or None,
         attributes=attributes or {},
         external_id=external_id,
         alias=alias,
@@ -898,6 +952,32 @@ async def update_card(
     elif "parent_label" in updates:
         await _validate_hierarchy_label(
             db, card.type, updates["parent_label"], card.parent_label, has_parent=True
+        )
+
+    # Guard: `status` is record retention, not a lifecycle. Only its two real
+    # values are accepted, so a lifecycle-like word ("PHASING_OUT") can never
+    # be written here and silently drop the card out of every ACTIVE query —
+    # where a card is in its life belongs in `lifecycle_stage`.
+    if updates.get("status") is not None and updates["status"] not in CARD_STATUSES:
+        raise HTTPException(
+            422,
+            {
+                "code": "invalid_card_status",
+                "message": (
+                    f"Card status must be one of {', '.join(CARD_STATUSES)}; got "
+                    f"{updates['status']!r}. Record a lifecycle stage with "
+                    "`lifecycle_stage` instead."
+                ),
+                "valid_statuses": list(CARD_STATUSES),
+            },
+        )
+
+    # Guard: the explicit lifecycle stage must be one the type defines. An
+    # empty string is the same request as null: clear it.
+    if "lifecycle_stage" in updates:
+        updates["lifecycle_stage"] = updates["lifecycle_stage"] or None
+        await _validate_lifecycle_stage(
+            db, card.type, updates["lifecycle_stage"], card.lifecycle_stage
         )
 
     # Guard: sibling-name uniqueness when name or parent changes. Only

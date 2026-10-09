@@ -124,12 +124,14 @@ async def calc_data_quality(db: AsyncSession, card: Card) -> float:
         if card.description and card.description.strip():
             filled_weight += desc_w
 
-    # Lifecycle bucket (at least one date set)
+    # Lifecycle bucket (a stated stage, or at least one date set)
     lc_w = _bucket_weight(dq_cfg, "lifecycle")
     if lc_w > 0:
         total_weight += lc_w
         lc = card.lifecycle or {}
-        if any(lc.get(p) for p in ("plan", "phaseIn", "active", "phaseOut", "endOfLife")):
+        if card.lifecycle_stage or any(
+            lc.get(p) for p in ("plan", "phaseIn", "active", "phaseOut", "endOfLife")
+        ):
             filled_weight += lc_w
 
     # Mandatory relation sides and mandatory tag groups: each applicable item

@@ -707,5 +707,12 @@
   "todos.recurrence.years_one": "每年",
   "todos.recurrence.years_other": "每 {{count}} 年",
   "utils.cardId.tooltip": "点击复制",
-  "utils.cardId.copied": "已复制"
+  "utils.cardId.copied": "已复制",
+  "lifecycle.currentStage": "当前阶段",
+  "lifecycle.currentStageHelp": "记录今天所处的阶段，无需日期。",
+  "lifecycle.notStated": "未指定（按日期推算）",
+  "lifecycle.unknown": "未知",
+  "lifecycle.stated": "已指定",
+  "lifecycle.fromDates": "按日期推算",
+  "lifecycle.datesDisagree": "按日期推算，此卡片处于 {{stage}}"
 }

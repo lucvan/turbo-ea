@@ -707,5 +707,12 @@
   "todos.recurrence.years_one": "Ogni anno",
   "todos.recurrence.years_other": "Ogni {{count}} anni",
   "utils.cardId.tooltip": "Clicca per copiare",
-  "utils.cardId.copied": "Copiato!"
+  "utils.cardId.copied": "Copiato!",
+  "lifecycle.currentStage": "Fase attuale",
+  "lifecycle.currentStageHelp": "Registra la fase com'è oggi. Non serve una data.",
+  "lifecycle.notStated": "Non indicata (usa le date)",
+  "lifecycle.unknown": "Sconosciuta",
+  "lifecycle.stated": "indicata",
+  "lifecycle.fromDates": "dalle date",
+  "lifecycle.datesDisagree": "Secondo le date questa scheda è in {{stage}}"
 }
