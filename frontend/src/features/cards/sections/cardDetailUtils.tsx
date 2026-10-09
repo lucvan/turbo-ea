@@ -2,6 +2,7 @@ import { useState } from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import LinkifiedText from "@/components/LinkifiedText";
+import MarkdownText from "@/components/MarkdownText";
 import Chip from "@mui/material/Chip";
 import Collapse from "@mui/material/Collapse";
 import Select from "@mui/material/Select";
@@ -468,8 +469,8 @@ export function FieldValue({
   }
   if (field.type === "multiline_text") {
     return (
-      <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
-        {safeString(value) ? <LinkifiedText text={safeString(value)} /> : "—"}
+      <Typography component="div" variant="body2">
+        {safeString(value) ? <MarkdownText text={safeString(value)} /> : "—"}
       </Typography>
     );
   }

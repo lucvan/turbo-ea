@@ -302,12 +302,18 @@ describe("links in free text (FieldValue)", () => {
   const plain: FieldDef = { key: "plain", label: "Plain", type: "text" };
   const site: FieldDef = { key: "site", label: "Site", type: "url" };
 
-  it("turns an address in a multi-line field into a new-tab link and keeps pre-wrap", () => {
+  it("turns an address in a multi-line field into a new-tab link and keeps the line break", () => {
     render(<FieldValue field={notes} value={"see https://a.io/doc.\nnext line"} />);
     const link = screen.getByRole("link", { name: "https://a.io/doc" });
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
-    expect(screen.getByText(/next line/)).toHaveStyle({ whiteSpace: "pre-wrap" });
+    expect(screen.getByText(/next line/).querySelector("br")).not.toBeNull();
+  });
+
+  it("renders markdown in a multi-line field", () => {
+    render(<FieldValue field={notes} value={"- **Ledger**\n- Reporting"} />);
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.getByText("Ledger").tagName).toBe("STRONG");
   });
 
   it("links a plain text field too, and never a javascript: scheme", () => {

@@ -13,6 +13,9 @@ RUN mkdir -p app && touch app/__init__.py && \
     rm -rf app
 
 COPY VERSION ./VERSION
+# This fork's revision and its own changelog (see CHANGELOG.fork.md).
+COPY FORK_VERSION ./FORK_VERSION
+COPY CHANGELOG.fork.md ./CHANGELOG.fork.md
 # The changelog ships with the backend so the "what's new after an upgrade"
 # dialog reads the notes for the running version off disk — no network, so it
 # behaves identically on an air-gapped install. `.dockerignore` excludes `*.md`
@@ -35,6 +38,8 @@ WORKDIR /app
 COPY --from=backend-build /install /usr/local
 COPY --from=backend-build /app/VERSION ./VERSION
 COPY --from=backend-build /app/CHANGELOG.md ./CHANGELOG.md
+COPY --from=backend-build /app/FORK_VERSION ./FORK_VERSION
+COPY --from=backend-build /app/CHANGELOG.fork.md ./CHANGELOG.fork.md
 COPY --from=backend-build /app/app ./app
 COPY --from=backend-build /app/alembic ./alembic
 COPY --from=backend-build /app/alembic.ini ./alembic.ini
@@ -107,6 +112,7 @@ WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json frontend/xlsx-0.20.3.tgz ./
 RUN npm ci
 COPY VERSION ./VERSION
+COPY FORK_VERSION ./FORK_VERSION
 COPY frontend/ ./
 RUN npm run build
 
@@ -811,6 +817,7 @@ RUN apk upgrade --no-cache && rm -rf /var/cache/apk/*
 WORKDIR /app
 
 COPY VERSION ./VERSION
+COPY FORK_VERSION ./FORK_VERSION
 COPY mcp-server/ ./
 # Install the app, then remove pip from the image. Unlike the backend stage
 # this stage does use pip at build time, so the uninstall happens in the same
