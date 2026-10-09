@@ -50,6 +50,9 @@ DEFAULT_VENDOR_PUBLIC_KEYS: dict[str, str] = {
     # Secondary license-signing key, kept separate from vendor-1; never signs
     # bundles. Rotates with a core release.
     "store-1": "rfjoGjveWUvMnmwo72N2nufua1iEkpPcH/xd1gg/ZDQ=",
+    # Internal key — signs this organisation's own extensions (fork-only).
+    # Bundle-only (see KEY_ROLES): we use free extensions, so no licenses.
+    "internal-1": "06vvy3PLuxbWIYHeBwVwchsWuq6nkssi5/42N0SDzZM=",
 }
 
 # Key id assumed for signed envelopes that carry no ``key_id`` of their own.
@@ -60,10 +63,11 @@ DEFAULT_VENDOR_KEY_ID = "vendor-1"
 # public key verifies any Ed25519 signature, a bundle signed with ``store-1``
 # is refused because ``store-1`` is not a bundle-signing key. A key id absent
 # from this map (a custom key a fork or test supplies) is permissive — it may
-# sign any artifact — so only the vendor's own keys carry the tighter grant.
+# sign any artifact — so only the keys listed here carry a tighter grant.
 KEY_ROLES: dict[str, frozenset[str]] = {
     "vendor-1": frozenset({"bundle", "license"}),
     "store-1": frozenset({"license"}),
+    "internal-1": frozenset({"bundle"}),
 }
 
 

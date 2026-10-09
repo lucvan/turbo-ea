@@ -10,6 +10,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from app.config import settings
 from app.core import extension_signing
 from app.core.extension_signing import (
+    _key_allows,
     trusted_public_keys,
     vendor_public_key,
     verify_bytes,
@@ -83,6 +84,31 @@ class TestVendorPublicKey:
         monkeypatch.setattr(extension_signing, "DEFAULT_VENDOR_PUBLIC_KEYS", {})
         assert trusted_public_keys() == {}
         assert vendor_public_key() == ""
+
+
+class TestInternalKey:
+    """This fork trusts an ``internal-1`` key for its own bundles - never licenses."""
+
+    def test_baked_map_keeps_vendor_keys_and_adds_internal(self):
+        keys = trusted_public_keys()
+        assert {"vendor-1", "store-1", "internal-1"} <= set(keys)
+        assert all(keys.values())
+
+    def test_internal_key_may_sign_bundles_but_not_licenses(self):
+        assert _key_allows("internal-1", "bundle") is True
+        assert _key_allows("internal-1", "license") is False
+
+    def test_vendor_grants_are_unchanged(self):
+        assert _key_allows("vendor-1", "bundle") and _key_allows("vendor-1", "license")
+        assert _key_allows("store-1", "license") and not _key_allows("store-1", "bundle")
+
+    def test_signature_from_internal_key_verifies_only_as_a_bundle(self):
+        private, public = make_keypair()
+        trusted = {"internal-1": public}
+        payload = b"manifest bytes"
+        sig = sign(private, payload)
+        assert verify_with_trusted(payload, sig, "internal-1", trusted, artifact="bundle")
+        assert not verify_with_trusted(payload, sig, "internal-1", trusted, artifact="license")
 
 
 class TestVerifyWithTrusted:
