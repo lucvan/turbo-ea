@@ -13,7 +13,11 @@ def _read_version() -> str:
         Path("VERSION"),
     ):
         if candidate.is_file():
-            return candidate.read_text().strip()
+            version = candidate.read_text().strip()
+            # This fork's own revision, as in ``backend/app/config.py``.
+            fork = candidate.with_name("FORK_VERSION")
+            revision = fork.read_text().strip() if fork.is_file() else ""
+            return f"{version}.{revision}" if revision.isdigit() else version
     return "0.0.0"
 
 

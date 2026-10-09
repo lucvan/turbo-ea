@@ -84,3 +84,39 @@ class TestReadVersion:
         monkeypatch.setattr(config, "__file__", str(package / "config.py"))
         monkeypatch.chdir(tmp_path)
         assert config._read_version() == "0.0.0"
+
+
+class TestForkRevision:
+    """This fork appends its own revision, exactly as the backend does."""
+
+    def _package(self, tmp_path, monkeypatch, version="2.158.0\n"):
+        package = tmp_path / "mcp-server" / "turbo_ea_mcp"
+        package.mkdir(parents=True)
+        (tmp_path / "mcp-server" / "VERSION").write_text(version)
+        monkeypatch.setattr(config, "__file__", str(package / "config.py"))
+        monkeypatch.chdir(tmp_path)
+        return tmp_path / "mcp-server" / "FORK_VERSION"
+
+    def test_revision_beside_the_version_file_is_appended(self, tmp_path, monkeypatch):
+        self._package(tmp_path, monkeypatch).write_text("7\n")
+        assert config._read_version() == "2.158.0.7"
+
+    def test_revision_follows_the_version_file_that_was_found(
+        self, tmp_path, monkeypatch
+    ):
+        package = tmp_path / "pkg" / "turbo_ea_mcp"
+        package.mkdir(parents=True)
+        (tmp_path / "VERSION").write_text("1.2.3\n")
+        (tmp_path / "FORK_VERSION").write_text("4")
+        monkeypatch.setattr(config, "__file__", str(package / "config.py"))
+        monkeypatch.chdir(tmp_path)
+        assert config._read_version() == "1.2.3.4"
+
+    @pytest.mark.parametrize("bad", ["", "beta", "1.2", "-1"])
+    def test_anything_but_a_whole_number_is_ignored(self, tmp_path, monkeypatch, bad):
+        self._package(tmp_path, monkeypatch).write_text(bad)
+        assert config._read_version() == "2.158.0"
+
+    def test_a_directory_named_fork_version_is_ignored(self, tmp_path, monkeypatch):
+        self._package(tmp_path, monkeypatch).mkdir()
+        assert config._read_version() == "2.158.0"

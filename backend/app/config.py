@@ -27,8 +27,23 @@ def _read_version() -> str:
     # Docker:    /app/app/config.py    -> /app/VERSION
     for candidate in [here.parent.parent / "VERSION", here.parent / "VERSION"]:
         if candidate.is_file():
-            return candidate.read_text().strip()
+            return _with_fork_revision(candidate)
     return "0.0.0-dev"
+
+
+def _with_fork_revision(version_file: Path) -> str:
+    """The upstream version, plus this fork's revision as a fourth component.
+
+    ``VERSION`` follows upstream; ``FORK_VERSION`` beside it is a whole number
+    this fork raises with every release of its own (see ``CHANGELOG.fork.md``).
+    ``2.158.0`` + ``2`` runs as ``2.158.0.2``, which sorts above ``2.158.0`` and
+    below ``2.158.1``, so a fork release is announced as an upgrade and a newer
+    upstream release still shows as available.
+    """
+    version = version_file.read_text().strip()
+    fork_file = version_file.with_name("FORK_VERSION")
+    revision = fork_file.read_text().strip() if fork_file.is_file() else ""
+    return f"{version}.{revision}" if revision.isdigit() else version
 
 
 APP_VERSION = _read_version()

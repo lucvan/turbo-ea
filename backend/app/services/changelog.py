@@ -1,4 +1,4 @@
-"""Read the bundled ``CHANGELOG.md`` and cut version sections out of it.
+"""Read the bundled changelogs and cut version sections out of them.
 
 Turbo EA ships its own changelog inside the backend image (see the `COPY` in
 ``/Dockerfile`` and the `!CHANGELOG.md` negation in ``.dockerignore``), so the
@@ -28,7 +28,13 @@ logger = logging.getLogger(__name__)
 VERSION_HEADING = re.compile(r"^##\s*\[(?P<version>[^\]]+)\]")
 
 
-def read_changelog() -> str:
+#: What a section heading says about where its changes came from, once this
+#: fork's own changelog is merged in.
+SOURCE_FORK = "Fork (lucvan/turbo-ea)"
+SOURCE_UPSTREAM = "Upstream Turbo EA"
+
+
+def _read_upstream_changelog() -> str:
     """Return the bundled changelog, or ``""`` when it is not on disk.
 
     Same two-candidate search as ``config._read_version``: the repository root
@@ -47,6 +53,74 @@ def read_changelog() -> str:
             return candidate.read_text(encoding="utf-8")
     logger.debug("No bundled CHANGELOG.md found")
     return ""
+
+
+def _read_fork_changelog() -> str:
+    """This fork's own changelog, bundled beside upstream's; ``""`` if absent."""
+    here = Path(__file__).resolve().parent
+    for candidate in (
+        here.parent.parent.parent / "CHANGELOG.fork.md",
+        here.parent.parent / "CHANGELOG.fork.md",
+    ):
+        if candidate.is_file():
+            return candidate.read_text(encoding="utf-8")
+    return ""
+
+
+def read_changelog() -> str:
+    """Return the changelog the release-notes dialog reads.
+
+    Upstream's ``CHANGELOG.md`` merged with this fork's ``CHANGELOG.fork.md``
+    (see :func:`merge_changelogs`). With no fork sections it is upstream's file
+    as it stands.
+    """
+    return merge_changelogs(_read_upstream_changelog(), _read_fork_changelog())
+
+
+def _raw_sections(text: str) -> tuple[str, list[tuple[str, list[str]]]]:
+    """Split a changelog into its preamble and ``(version, lines)`` sections,
+    headings left as written."""
+    preamble: list[str] = []
+    sections: list[tuple[str, list[str]]] = []
+    for line in text.replace("\r\n", "\n").split("\n"):
+        match = VERSION_HEADING.match(line)
+        if match:
+            sections.append((match.group("version"), [line]))
+        elif sections:
+            sections[-1][1].append(line)
+        else:
+            preamble.append(line)
+    return "\n".join(preamble), sections
+
+
+def merge_changelogs(upstream: str, fork: str) -> str:
+    """One changelog from upstream's and this fork's, newest version first.
+
+    Each section heading gains its source, so a reader of the what's-new
+    dialog can tell a fork change from an upstream one — after a sync the two
+    arrive in the same upgrade. Fork versions carry a fourth component
+    (``2.158.0.2``), which is what places them between upstream releases.
+    The fork file's preamble (its contributor notes) is dropped.
+    """
+    _, fork_sections = _raw_sections(fork)
+    if not fork_sections:
+        return upstream
+    preamble, upstream_sections = _raw_sections(upstream)
+
+    labelled = [
+        (version_tuple(version), [f"{lines[0].rstrip()} · {source}", *lines[1:]])
+        for source, sections in (
+            (SOURCE_FORK, fork_sections),
+            (SOURCE_UPSTREAM, upstream_sections),
+        )
+        for version, lines in sections
+    ]
+    # Stable sort: within one file, the order as written is kept.
+    labelled.sort(key=lambda section: section[0], reverse=True)
+
+    parts = [preamble.rstrip("\n")] if preamble.strip() else []
+    parts.extend("\n".join(lines).rstrip("\n") for _, lines in labelled)
+    return "\n\n".join(parts) + "\n"
 
 
 def _normalise_heading(line: str) -> str:

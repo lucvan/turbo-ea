@@ -7,9 +7,18 @@ const versionFile = [
   path.resolve(__dirname, "../VERSION"),
   path.resolve(__dirname, "VERSION"),
 ].find((f) => fs.existsSync(f));
-const version = versionFile
+const upstreamVersion = versionFile
   ? fs.readFileSync(versionFile, "utf-8").trim()
   : "0.0.0-dev";
+// This fork's own revision, appended as a fourth component exactly as
+// `backend/app/config.py` does — the two must agree, or `appUpdateGuard`
+// reloads the page on every load.
+const forkFile = versionFile && path.join(path.dirname(versionFile), "FORK_VERSION");
+const forkRevision =
+  forkFile && fs.existsSync(forkFile) ? fs.readFileSync(forkFile, "utf-8").trim() : "";
+const version = /^\d+$/.test(forkRevision)
+  ? `${upstreamVersion}.${forkRevision}`
+  : upstreamVersion;
 
 export default defineConfig({
   plugins: [react()],
