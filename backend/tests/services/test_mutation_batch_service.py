@@ -5,18 +5,15 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import pytest
+
 from app.services.mutation_batch_service import (
     CONFIRM_TOKEN_TTL,
+    ConfirmTokenError,
+    confirm_token_expires_at,
     issue_confirm_token,
-    verify_confirm_token,
+    redeem_confirm_token,
 )
-
-
-def _fake_batch(token: str | None, age: timedelta = timedelta(seconds=0)):
-    return SimpleNamespace(
-        confirm_token=token,
-        created_at=datetime.now(timezone.utc) - age,
-    )
 
 
 def test_issue_confirm_token_is_random_and_long_enough():
@@ -26,32 +23,34 @@ def test_issue_confirm_token_is_random_and_long_enough():
     assert len(a) >= 16
 
 
-def test_verify_rejects_missing_token():
-    batch = _fake_batch(token="x" * 24)
-    assert verify_confirm_token(batch, "") is False
+def test_a_token_expires_one_ttl_after_its_batch_was_opened():
+    opened = datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc)
+    batch = SimpleNamespace(confirm_token="tok", created_at=opened)
+    assert CONFIRM_TOKEN_TTL == timedelta(minutes=15)
+    assert confirm_token_expires_at(batch) == opened + timedelta(minutes=15)
 
 
-def test_verify_rejects_when_batch_has_no_token():
-    batch = _fake_batch(token=None)
-    assert verify_confirm_token(batch, "anything") is False
+def test_a_batch_without_a_token_has_no_expiry():
+    opened = datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc)
+    assert confirm_token_expires_at(SimpleNamespace(confirm_token=None, created_at=opened)) is None
+    assert confirm_token_expires_at(SimpleNamespace(confirm_token="tok", created_at=None)) is None
 
 
-def test_verify_rejects_mismatched_token():
-    batch = _fake_batch(token="real-token")
-    assert verify_confirm_token(batch, "wrong-token") is False
-
-
-def test_verify_accepts_matching_fresh_token():
-    token = issue_confirm_token()
-    batch = _fake_batch(token=token)
-    assert verify_confirm_token(batch, token) is True
-
-
-def test_verify_rejects_expired_token():
-    token = issue_confirm_token()
-    # 1 second past the TTL → reject
-    batch = _fake_batch(token=token, age=CONFIRM_TOKEN_TTL + timedelta(seconds=1))
-    assert verify_confirm_token(batch, token) is False
+async def test_redeeming_without_a_token_is_refused_before_any_query():
+    """``db=None`` would raise on the first query: the refusal comes first."""
+    with pytest.raises(ConfirmTokenError) as caught:
+        await redeem_confirm_token(
+            None,
+            actor=SimpleNamespace(id="u"),
+            tool_name="update_cards_bulk",
+            row_count=40,
+            payload_hash=None,
+            token="",
+        )
+    assert caught.value.code == "confirm_token_required"
+    assert "40 rows" in caught.value.message
+    assert "Run the dry-run again" in caught.value.message
+    assert str(caught.value) == caught.value.message
 
 
 # ── Auto-batch skiplist ──────────────────────────────────────────────────

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
@@ -41,6 +43,9 @@ from app.schemas.card import (
     CardBulkRestoreRequest,
     CardBulkRestoreResponse,
     CardBulkRestoreSkippedEntry,
+    CardBulkRowResult,
+    CardBulkRowsResponse,
+    CardBulkRowsUpdate,
     CardBulkSkippedEntry,
     CardBulkUpdate,
     CardCountsResponse,
@@ -1601,15 +1606,27 @@ async def descendant_relations(
     return DescendantRelationsResponse(rows=rows, total=total, via_total=via_total)
 
 
-@router.patch("/bulk")
-async def bulk_update(
-    body: CardBulkUpdate,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    await PermissionService.require_permission(db, user, "inventory.bulk_edit")
-    uuids = [uuid.UUID(i) for i in body.ids]
+@dataclass
+class _BulkStage:
+    """What `_stage_bulk_update` worked out for one shared patch."""
+
+    sheets: list[Card]
+    diffs: list[dict]
+    broken_cards: list[Card]
+
+
+async def _stage_bulk_update(
+    db: AsyncSession,
+    user: User,
+    uuids: list[uuid.UUID],
+    updates: dict,
+    *,
+    dry_run: bool,
+) -> _BulkStage:
+    """Validate one shared patch against `uuids` and, unless `dry_run`, apply it
+    to the session. Never commits: the caller owns the transaction, which is
+    what lets `PATCH /cards/bulk-rows` stage several patches and commit them as
+    one. `updates` is consumed (keys are popped and normalised)."""
     result = await db.execute(select(Card).where(Card.id.in_(uuids)))
     sheets = list(result.scalars().all())
 
@@ -1631,7 +1648,6 @@ async def bulk_update(
             403,
             "Not enough permissions to edit cards of type: " + ", ".join(denied_types),
         )
-    updates = body.updates.model_dump(exclude_unset=True)
     strict_attrs = updates.pop("strict_attributes", False)
     # The human-readable reference is per-card and uniqueness-gated; it is never
     # editable in bulk (auto refs are write-once, manual refs must stay unique).
@@ -1809,23 +1825,15 @@ async def bulk_update(
                 # below is not — and a card the bulk edit did not change must
                 # not surface as "changed just now" in the Inventory while its
                 # History tab stays empty (#995).
-                if not body.dry_run:
+                if not dry_run:
                     setattr(card, field, value)
         if before:
             diffs.append({"id": str(card.id), "before": before, "after": after})
-            if not body.dry_run:
+            if not dry_run:
                 card.updated_by = user.id
 
-    if body.dry_run:
-        return {
-            "dry_run": True,
-            "results": [
-                {"row_index": i, "card_id": d["id"], "status": "would_update", **d}
-                for i, d in enumerate(diffs)
-            ],
-            "updated": 0,
-            "would_update": len(diffs),
-        }
+    if dry_run:
+        return _BulkStage(sheets=sheets, diffs=diffs, broken_cards=[])
 
     # A parent change moves the whole subtree, so hierarchyLevel /
     # capabilityLevel have to be recomputed for the moved card and every
@@ -1891,13 +1899,51 @@ async def bulk_update(
     for card, changed_levels in changed_levels_by_card:
         await emit_hierarchy_cascade_events(db, changed_levels, previous_levels, card.id, user.id)
 
+    return _BulkStage(
+        sheets=sheets,
+        diffs=diffs,
+        broken_cards=[c for c in sheets if str(c.id) in broken_ids],
+    )
+
+
+@router.patch("/bulk")
+async def bulk_update(
+    body: CardBulkUpdate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    await PermissionService.require_permission(db, user, "inventory.bulk_edit")
+    uuids = [uuid.UUID(i) for i in body.ids]
+    stage = await _stage_bulk_update(
+        db, user, uuids, body.updates.model_dump(exclude_unset=True), dry_run=body.dry_run
+    )
+
+    if body.dry_run:
+        # `row_index` is the card's position in the request's `ids`, so a
+        # caller can pair a result with the row it sent. It used to count the
+        # changed cards only, which pointed at the wrong row as soon as one
+        # card was already up to date.
+        position: dict[str, int] = {}
+        for index, card_uuid in enumerate(uuids):
+            position.setdefault(str(card_uuid), index)
+        return {
+            "dry_run": True,
+            "results": [
+                {"row_index": position[d["id"]], "card_id": d["id"], "status": "would_update", **d}
+                for d in stage.diffs
+            ],
+            "updated": 0,
+            "would_update": len(stage.diffs),
+        }
+
     # One notification per person, however many of their cards this edit broke
     # — a five-hundred-card mass edit must not put five hundred bell entries on
     # every stakeholder. Built before the commit (the rows are in the session),
     # delivered after the response.
     broken_recipients = await card_approval.build_approval_broken_recipients(
         db,
-        cards=[c for c in sheets if str(c.id) in broken_ids],
+        cards=stage.broken_cards,
         actor_id=user.id,
         actor_display_name=user.display_name,
     )
@@ -1919,6 +1965,191 @@ async def bulk_update(
     return [
         _card_to_response(card, strip_cost_keys=redact.get(card.id, frozenset())) for card in sheets
     ]
+
+
+_BULK_ROW_STATUSES = ("would_update", "updated", "unchanged", "error", "not_applied")
+
+
+def _http_error_text(exc: HTTPException) -> str:
+    return exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, default=str)
+
+
+@router.patch("/bulk-rows", response_model=CardBulkRowsResponse)
+async def bulk_update_rows(
+    body: CardBulkRowsUpdate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Update many cards, each with its own patch, as one transaction.
+
+    `PATCH /cards/bulk` applies a single patch to every id. A caller with a
+    patch per card (the MCP `update_cards_bulk` tool) used to send one request
+    per distinct patch, which committed each group separately: a rejection in a
+    later group left the earlier ones written. Here every row is validated
+    first and nothing is written unless all of them pass; the write then runs
+    in a single transaction.
+
+    Every input row gets exactly one result, at its own `row_index`:
+    `would_update` / `unchanged` / `error` on a dry run, `updated` /
+    `unchanged` on a commit, and `error` / `not_applied` when a commit was
+    refused. `committed` says whether anything was written.
+    """
+    await PermissionService.require_permission(db, user, "inventory.bulk_edit")
+
+    errors: dict[int, str] = {}
+    ids: dict[int, uuid.UUID] = {}
+    for index, row in enumerate(body.rows):
+        try:
+            ids[index] = uuid.UUID(row.card_id)
+        except ValueError:
+            errors[index] = "card_id is not a valid UUID"
+
+    # Two rows for one card have no defined order, so neither is applied.
+    rows_by_card: dict[uuid.UUID, list[int]] = {}
+    for index, card_uuid in ids.items():
+        rows_by_card.setdefault(card_uuid, []).append(index)
+    for indexes in rows_by_card.values():
+        if len(indexes) > 1:
+            for index in indexes:
+                errors[index] = f"Duplicate card_id: rows {indexes} address the same card"
+
+    existing: set[uuid.UUID] = set()
+    if rows_by_card:
+        found = await db.execute(select(Card.id).where(Card.id.in_(list(rows_by_card))))
+        existing = set(found.scalars().all())
+
+    patches: dict[int, dict] = {}
+    for index, card_uuid in ids.items():
+        if index in errors:
+            continue
+        if card_uuid not in existing:
+            errors[index] = "Card not found"
+            continue
+        patch = body.rows[index].updates.model_dump(exclude_unset=True)
+        patch.pop("strict_attributes", None)
+        if not patch:
+            errors[index] = "No updatable fields in this row"
+            continue
+        if body.strict_attributes or body.rows[index].updates.strict_attributes:
+            patch["strict_attributes"] = True
+        patches[index] = patch
+
+    # Rows sharing a patch are staged together: the per-type validation and the
+    # sibling-name check inside a group then run once, as they do for the UI.
+    groups: dict[str, list[int]] = {}
+    for index, patch in patches.items():
+        groups.setdefault(json.dumps(patch, sort_keys=True, default=str), []).append(index)
+
+    async def _stage(indexes: list[int], *, dry_run: bool) -> _BulkStage:
+        return await _stage_bulk_update(
+            db,
+            user,
+            [ids[i] for i in indexes],
+            dict(patches[indexes[0]]),
+            dry_run=dry_run,
+        )
+
+    diffs: dict[int, dict] = {}
+
+    def _record(indexes: list[int], stage: _BulkStage) -> None:
+        by_card = {d["id"]: d for d in stage.diffs}
+        for i in indexes:
+            diff = by_card.get(str(ids[i]))
+            if diff is not None:
+                diffs[i] = diff
+
+    # Pass 1 — validate everything without writing.
+    for indexes in groups.values():
+        try:
+            _record(indexes, await _stage(indexes, dry_run=True))
+        except HTTPException as group_exc:
+            # Find out which rows the rejection belongs to. A group of one, or
+            # a rejection only the group as a whole provokes (two cards that
+            # would become same-named siblings), is reported on every row.
+            row_errors: dict[int, str] = {}
+            if len(indexes) > 1:
+                for i in indexes:
+                    try:
+                        _record([i], await _stage([i], dry_run=True))
+                    except HTTPException as row_exc:
+                        row_errors[i] = _http_error_text(row_exc)
+            if not row_errors:
+                row_errors = {i: _http_error_text(group_exc) for i in indexes}
+            errors.update(row_errors)
+
+    def _response(*, committed: bool, error: str | None = None) -> CardBulkRowsResponse:
+        results: list[CardBulkRowResult] = []
+        for index, row in enumerate(body.rows):
+            diff = diffs.get(index) or {}
+            if index in errors:
+                status, diff = "error", {}
+            elif not body.dry_run and not committed:
+                status = "not_applied"
+            elif not diff:
+                status = "unchanged"
+            else:
+                status = "would_update" if body.dry_run else "updated"
+            results.append(
+                CardBulkRowResult(
+                    row_index=index,
+                    card_id=row.card_id,
+                    status=status,
+                    before=diff.get("before", {}),
+                    after=diff.get("after", {}),
+                    error=errors.get(index),
+                )
+            )
+        counts = {s: sum(1 for r in results if r.status == s) for s in _BULK_ROW_STATUSES}
+        return CardBulkRowsResponse(
+            dry_run=body.dry_run,
+            committed=committed,
+            total=len(results),
+            would_update=counts["would_update"],
+            updated=counts["updated"],
+            unchanged=counts["unchanged"],
+            failed=counts["error"],
+            not_applied=counts["not_applied"],
+            error=error,
+            results=results,
+        )
+
+    if body.dry_run:
+        return _response(committed=False)
+    if errors:
+        return _response(
+            committed=False,
+            error=f"{len(errors)} row(s) were rejected, so nothing was written",
+        )
+
+    # Pass 2 — write. Anything a later group trips over (a clash only visible
+    # once an earlier group has moved its cards) rolls the whole call back.
+    diffs.clear()
+    broken_cards: list[Card] = []
+    try:
+        for indexes in groups.values():
+            stage = await _stage(indexes, dry_run=False)
+            _record(indexes, stage)
+            broken_cards.extend(stage.broken_cards)
+        broken_recipients = await card_approval.build_approval_broken_recipients(
+            db,
+            cards=broken_cards,
+            actor_id=user.id,
+            actor_display_name=user.display_name,
+        )
+        actor_id = user.id
+        await db.commit()
+    except HTTPException as exc:
+        await db.rollback()
+        diffs.clear()
+        return _response(
+            committed=False,
+            error=f"Nothing was written: {_http_error_text(exc)}",
+        )
+    await card_approval.deliver_approval_broken(
+        db, broken_recipients, actor_id=actor_id, background_tasks=background_tasks
+    )
+    return _response(committed=True)
 
 
 @router.post("/bulk-archive", response_model=CardBulkArchiveResponse)

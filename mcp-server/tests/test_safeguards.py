@@ -99,6 +99,7 @@ class TestConfirmationGate:
             {"row_index": i, "type": "Application", "name": f"A{i}"} for i in range(3)
         ]
         write_calls: list = []
+        open_calls: list = []
         commit_calls: list = []
 
         async def router(path, json=None):
@@ -106,6 +107,7 @@ class TestConfirmationGate:
                 commit_calls.append(json)
                 return {"id": "b2", "committed_at": "now"}
             if path.startswith("/mutation-batches"):
+                open_calls.append(json)
                 return {"id": "b2", "dry_run": False}
             write_calls.append((path, json))
             return {"results": [], "created": 3, "failed": 0, "dry_run": False}
@@ -116,9 +118,12 @@ class TestConfirmationGate:
                 cards=rows, dry_run=False, confirm_token="ECHOED-TOK"
             )
         assert len(write_calls) == 1
-        # Token is echoed back on the commit call so the backend can
-        # match it against the batch row.
-        assert commit_calls[0]["confirm_token"] == "ECHOED-TOK"
+        # The token goes with the call that opens the write batch, so the
+        # backend can refuse before anything is written. Sending it with the
+        # close call, after the write, checked nothing.
+        assert open_calls[0]["confirm_token"] == "ECHOED-TOK"
+        assert open_calls[0]["require_confirmation"] is True
+        assert "confirm_token" not in commit_calls[0]
 
 
 # ── Mutation-batch lifecycle (S1 + S6) ──────────────────────────────────────

@@ -146,6 +146,47 @@ class CardBulkUpdate(BaseModel):
     dry_run: bool = False
 
 
+class CardBulkRowUpdate(BaseModel):
+    card_id: str
+    updates: CardUpdate
+
+
+class CardBulkRowsUpdate(BaseModel):
+    """Body of ``PATCH /cards/bulk-rows``: one patch per card, applied as a
+    single transaction. ``strict_attributes`` applies to every row."""
+
+    rows: list[CardBulkRowUpdate] = Field(..., min_length=1, max_length=2000)
+    strict_attributes: bool = False
+    dry_run: bool = False
+
+
+class CardBulkRowResult(BaseModel):
+    """Outcome of one input row. ``row_index`` is the row's position in the
+    request. ``before`` / ``after`` hold only the fields that differ."""
+
+    row_index: int
+    card_id: str
+    status: Literal["would_update", "updated", "unchanged", "error", "not_applied"]
+    before: dict[str, Any] = Field(default_factory=dict)
+    after: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+
+
+class CardBulkRowsResponse(BaseModel):
+    """The counts partition ``results``: ``total`` is their sum."""
+
+    dry_run: bool
+    committed: bool
+    total: int
+    would_update: int
+    updated: int
+    unchanged: int
+    failed: int
+    not_applied: int
+    error: str | None = None
+    results: list[CardBulkRowResult]
+
+
 class TagRef(BaseModel):
     id: str
     name: str
