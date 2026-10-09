@@ -130,6 +130,20 @@ describe("ShowOnCardSelector", () => {
     expect(names[subtypeAt + 1]).toBe("Alias");
   });
 
+  it("ticks the Alias row to match the setting", async () => {
+    setup({ fields: [], showAlias: true });
+    const menu = await openMenu();
+    const row = within(menu).getByText("Alias").closest("li") as HTMLElement;
+    expect(within(row).getByRole("checkbox")).toBeChecked();
+  });
+
+  it("leaves the Alias row unticked when the alias is off", async () => {
+    setup({ fields: [], showAlias: false });
+    const menu = await openMenu();
+    const row = within(menu).getByText("Alias").closest("li") as HTMLElement;
+    expect(within(row).getByRole("checkbox")).not.toBeChecked();
+  });
+
   it("counts the alias row on the button", () => {
     setup({ fields: [], showAlias: true });
     expect(screen.getByRole("button")).toHaveTextContent("(1)");
