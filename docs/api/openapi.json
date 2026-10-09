@@ -2396,6 +2396,172 @@
         "title": "CardBulkRestoreSkippedEntry",
         "type": "object"
       },
+      "CardBulkRowResult": {
+        "description": "Outcome of one input row. ``row_index`` is the row's position in the\nrequest. ``before`` / ``after`` hold only the fields that differ.",
+        "properties": {
+          "after": {
+            "additionalProperties": true,
+            "title": "After",
+            "type": "object"
+          },
+          "before": {
+            "additionalProperties": true,
+            "title": "Before",
+            "type": "object"
+          },
+          "card_id": {
+            "title": "Card Id",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "row_index": {
+            "title": "Row Index",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "would_update",
+              "updated",
+              "unchanged",
+              "error",
+              "not_applied"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "row_index",
+          "card_id",
+          "status"
+        ],
+        "title": "CardBulkRowResult",
+        "type": "object"
+      },
+      "CardBulkRowUpdate": {
+        "properties": {
+          "card_id": {
+            "title": "Card Id",
+            "type": "string"
+          },
+          "updates": {
+            "$ref": "#/components/schemas/CardUpdate"
+          }
+        },
+        "required": [
+          "card_id",
+          "updates"
+        ],
+        "title": "CardBulkRowUpdate",
+        "type": "object"
+      },
+      "CardBulkRowsResponse": {
+        "description": "The counts partition ``results``: ``total`` is their sum.",
+        "properties": {
+          "committed": {
+            "title": "Committed",
+            "type": "boolean"
+          },
+          "dry_run": {
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "not_applied": {
+            "title": "Not Applied",
+            "type": "integer"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/CardBulkRowResult"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "unchanged": {
+            "title": "Unchanged",
+            "type": "integer"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          },
+          "would_update": {
+            "title": "Would Update",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dry_run",
+          "committed",
+          "total",
+          "would_update",
+          "updated",
+          "unchanged",
+          "failed",
+          "not_applied",
+          "results"
+        ],
+        "title": "CardBulkRowsResponse",
+        "type": "object"
+      },
+      "CardBulkRowsUpdate": {
+        "description": "Body of ``PATCH /cards/bulk-rows``: one patch per card, applied as a\nsingle transaction. ``strict_attributes`` applies to every row.",
+        "properties": {
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/CardBulkRowUpdate"
+            },
+            "maxItems": 2000,
+            "minItems": 1,
+            "title": "Rows",
+            "type": "array"
+          },
+          "strict_attributes": {
+            "default": false,
+            "title": "Strict Attributes",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "title": "CardBulkRowsUpdate",
+        "type": "object"
+      },
       "CardBulkSkippedEntry": {
         "properties": {
           "card_id": {
@@ -7582,10 +7748,46 @@
       "MutationBatchOpen": {
         "description": "Open a batch before a mutating tool wrapper performs writes.",
         "properties": {
+          "confirm_token": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirm Token"
+          },
           "dry_run": {
             "default": false,
             "title": "Dry Run",
             "type": "boolean"
+          },
+          "payload_hash": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload Hash"
+          },
+          "require_confirmation": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Require Confirmation"
           },
           "tool_name": {
             "maxLength": 100,
@@ -7647,6 +7849,18 @@
               }
             ],
             "title": "Confirm Token"
+          },
+          "confirm_token_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirm Token Expires At"
           },
           "created_at": {
             "format": "date-time",
@@ -21994,6 +22208,48 @@
         ]
       }
     },
+    "/api/v1/cards/bulk-rows": {
+      "patch": {
+        "description": "Update many cards, each with its own patch, as one transaction.\n\n`PATCH /cards/bulk` applies a single patch to every id. A caller with a\npatch per card (the MCP `update_cards_bulk` tool) used to send one request\nper distinct patch, which committed each group separately: a rejection in a\nlater group left the earlier ones written. Here every row is validated\nfirst and nothing is written unless all of them pass; the write then runs\nin a single transaction.\n\nEvery input row gets exactly one result, at its own `row_index`:\n`would_update` / `unchanged` / `error` on a dry run, `updated` /\n`unchanged` on a commit, and `error` / `not_applied` when a commit was\nrefused. `committed` says whether anything was written.",
+        "operationId": "bulk_update_rows_api_v1_cards_bulk_rows_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CardBulkRowsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardBulkRowsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bulk Update Rows",
+        "tags": [
+          "cards"
+        ]
+      }
+    },
     "/api/v1/cards/counts": {
       "get": {
         "description": "Per-card-type counts of ACTIVE cards. Powers the type chips with\ncounts in the diagram editor's Insert Cards dialog (LeanIX-style).\nHidden types are excluded so the dialog never offers them.\n\nDeclared above /{card_id} so the literal `counts` segment isn't shadowed\nby the UUID-typed catch-all and parsed as a (broken) UUID.",
@@ -29154,7 +29410,7 @@
         ]
       },
       "post": {
-        "description": "Open a mutation batch. Returns the batch id and, when the row\ncount exceeds the confirmation threshold on a dry-run, a one-shot\n``confirm_token`` the commit call must echo back.",
+        "description": "Open a mutation batch.\n\nA dry-run that needs confirmation is issued a one-shot ``confirm_token``\nbound to this user, tool, row count and ``payload_hash``. A write that\nneeds confirmation must present that token here: it is checked and spent\nbefore the batch exists, so a refused commit has written nothing.",
         "operationId": "open_batch_api_v1_mutation_batches_post",
         "parameters": [
           {
@@ -29254,6 +29510,7 @@
     },
     "/api/v1/mutation-batches/{batch_id}/commit": {
       "post": {
+        "description": "Close a batch with its summary. Closing never needs a confirm token:\na preview has nothing to confirm, and a write was confirmed when its\nbatch was opened. Demanding the token here is what made every dry-run\nabove the threshold fail after the preview had been computed.",
         "operationId": "close_batch_api_v1_mutation_batches__batch_id__commit_post",
         "parameters": [
           {
